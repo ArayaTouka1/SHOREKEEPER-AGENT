@@ -1,0 +1,679 @@
+{
+  "characterId": "_shared",
+  "roleName": "共享池",
+  "count": 57,
+  "updatedAt": "2026-09-26T09:53:25.420Z",
+  "notice": "没有专属表情包的角色会回落到这里。给角色单独加图后会自动优先用自己的。",
+  "stickers": [
+    {
+      "id": "st_shared_001",
+      "file": "st_shorekeeper_001.jpg",
+      "tags": [
+        "害羞",
+        "脸红",
+        "不好意思"
+      ],
+      "mood": "shy",
+      "source": "shared",
+      "originalName": "002_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_002",
+      "file": "st_shorekeeper_002.jpg",
+      "tags": [
+        "思考",
+        "托腮",
+        "想一想"
+      ],
+      "mood": "think",
+      "source": "shared",
+      "originalName": "003_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_003",
+      "file": "st_shorekeeper_003.jpg",
+      "tags": [
+        "平静",
+        "闭眼",
+        "安静"
+      ],
+      "mood": "calm",
+      "source": "shared",
+      "originalName": "004_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_004",
+      "file": "st_shorekeeper_004.jpg",
+      "tags": [
+        "害羞",
+        "捂脸",
+        "被夸"
+      ],
+      "mood": "shy",
+      "source": "shared",
+      "originalName": "005_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_005",
+      "file": "st_shorekeeper_005.jpg",
+      "tags": [
+        "惊讶",
+        "震惊",
+        "没想到"
+      ],
+      "mood": "shock",
+      "source": "shared",
+      "originalName": "006_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_006",
+      "file": "st_shorekeeper_006.jpg",
+      "tags": [
+        "害羞",
+        "捂脸"
+      ],
+      "mood": "shy",
+      "source": "shared",
+      "originalName": "007_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_007",
+      "file": "st_shorekeeper_007.jpg",
+      "tags": [
+        "害羞",
+        "低头"
+      ],
+      "mood": "shy",
+      "source": "shared",
+      "originalName": "009_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_008",
+      "file": "st_shorekeeper_008.jpg",
+      "tags": [
+        "喝东西",
+        "喝茶",
+        "吃饭"
+      ],
+      "mood": "eat",
+      "source": "shared",
+      "originalName": "00ecb379-68d3-467e-a6ba-e1d7184cb178.png"
+    },
+    {
+      "id": "st_shared_009",
+      "file": "st_shorekeeper_009.jpg",
+      "tags": [
+        "比心",
+        "爱心",
+        "喜欢你"
+      ],
+      "mood": "heart",
+      "source": "shared",
+      "originalName": "011_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_010",
+      "file": "st_shorekeeper_010.jpg",
+      "tags": [
+        "困",
+        "睡觉",
+        "趴着"
+      ],
+      "mood": "sleep",
+      "source": "shared",
+      "originalName": "015_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_011",
+      "file": "st_shorekeeper_011.jpg",
+      "tags": [
+        "开心",
+        "笑",
+        "高兴"
+      ],
+      "mood": "happy",
+      "source": "shared",
+      "originalName": "017_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_012",
+      "file": "st_shorekeeper_012.jpg",
+      "tags": [
+        "加油",
+        "欢呼",
+        "打气"
+      ],
+      "mood": "cheer",
+      "source": "shared",
+      "originalName": "018_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_013",
+      "file": "st_shorekeeper_013.jpg",
+      "tags": [
+        "疑惑",
+        "摊手",
+        "不解"
+      ],
+      "mood": "confuse",
+      "source": "shared",
+      "originalName": "021_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_014",
+      "file": "st_shorekeeper_014.jpg",
+      "tags": [
+        "难过",
+        "失落",
+        "委屈"
+      ],
+      "mood": "sad",
+      "source": "shared",
+      "originalName": "022_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_015",
+      "file": "st_shorekeeper_015.jpg",
+      "tags": [
+        "比心",
+        "爱心"
+      ],
+      "mood": "heart",
+      "source": "shared",
+      "originalName": "023_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_016",
+      "file": "st_shorekeeper_016.jpg",
+      "tags": [
+        "点赞",
+        "赞同",
+        "好厉害",
+        "干得好"
+      ],
+      "mood": "thumbsup",
+      "source": "shared",
+      "originalName": "024_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_017",
+      "file": "st_shorekeeper_017.jpg",
+      "tags": [
+        "疑惑",
+        "问号",
+        "不懂"
+      ],
+      "mood": "confuse",
+      "source": "shared",
+      "originalName": "025_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_018",
+      "file": "st_shorekeeper_018.jpg",
+      "tags": [
+        "害羞",
+        "脸红"
+      ],
+      "mood": "shy",
+      "source": "shared",
+      "originalName": "026_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_019",
+      "file": "st_shorekeeper_019.jpg",
+      "tags": [
+        "跑",
+        "冲",
+        "兴奋",
+        "来啦"
+      ],
+      "mood": "run",
+      "source": "shared",
+      "originalName": "028_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_020",
+      "file": "st_shorekeeper_020.jpg",
+      "tags": [
+        "无聊",
+        "没事做",
+        "发呆"
+      ],
+      "mood": "bored",
+      "source": "shared",
+      "originalName": "029_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_021",
+      "file": "st_shorekeeper_021.jpg",
+      "tags": [
+        "平静",
+        "坐着",
+        "陪伴"
+      ],
+      "mood": "calm",
+      "source": "shared",
+      "originalName": "030_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_022",
+      "file": "st_shorekeeper_022.jpg",
+      "tags": [
+        "惊讶",
+        "张嘴",
+        "啊"
+      ],
+      "mood": "shock",
+      "source": "shared",
+      "originalName": "031_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_023",
+      "file": "st_shorekeeper_023.jpg",
+      "tags": [
+        "打招呼",
+        "挥手",
+        "你好",
+        "来了"
+      ],
+      "mood": "wave",
+      "source": "shared",
+      "originalName": "034_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_024",
+      "file": "st_shorekeeper_024.jpg",
+      "tags": [
+        "害羞",
+        "捂脸"
+      ],
+      "mood": "shy",
+      "source": "shared",
+      "originalName": "035_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_025",
+      "file": "st_shorekeeper_025.jpg",
+      "tags": [
+        "大哭",
+        "崩溃",
+        "受不了"
+      ],
+      "mood": "cry",
+      "source": "shared",
+      "originalName": "036_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_026",
+      "file": "st_shorekeeper_026.jpg",
+      "tags": [
+        "温柔",
+        "微笑",
+        "安静"
+      ],
+      "mood": "calm",
+      "source": "shared",
+      "originalName": "038_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_027",
+      "file": "st_shorekeeper_027.jpg",
+      "tags": [
+        "思考",
+        "托腮",
+        "想想"
+      ],
+      "mood": "think",
+      "source": "shared",
+      "originalName": "039_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_028",
+      "file": "st_shorekeeper_028.jpg",
+      "tags": [
+        "惊讶",
+        "意外",
+        "真的吗"
+      ],
+      "mood": "shock",
+      "source": "shared",
+      "originalName": "043_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_029",
+      "file": "st_shorekeeper_029.jpg",
+      "tags": [
+        "害羞",
+        "捂嘴"
+      ],
+      "mood": "shy",
+      "source": "shared",
+      "originalName": "045_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_030",
+      "file": "st_shorekeeper_030.jpg",
+      "tags": [
+        "星星",
+        "闪亮",
+        "眼睛发光",
+        "期待"
+      ],
+      "mood": "star",
+      "source": "shared",
+      "originalName": "046_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_031",
+      "file": "st_shorekeeper_031.jpg",
+      "tags": [
+        "比心",
+        "爱你"
+      ],
+      "mood": "heart",
+      "source": "shared",
+      "originalName": "048_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_032",
+      "file": "st_shorekeeper_032.jpg",
+      "tags": [
+        "音乐",
+        "演奏",
+        "琴"
+      ],
+      "mood": "music",
+      "source": "shared",
+      "originalName": "050_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_033",
+      "file": "st_shorekeeper_033.jpg",
+      "tags": [
+        "看书",
+        "读书",
+        "学习"
+      ],
+      "mood": "book",
+      "source": "shared",
+      "originalName": "051_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_034",
+      "file": "st_shorekeeper_034.jpg",
+      "tags": [
+        "平静",
+        "坐着"
+      ],
+      "mood": "calm",
+      "source": "shared",
+      "originalName": "053_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_035",
+      "file": "st_shorekeeper_035.jpg",
+      "tags": [
+        "抱",
+        "玩偶",
+        "拥抱"
+      ],
+      "mood": "hug",
+      "source": "shared",
+      "originalName": "054_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_036",
+      "file": "st_shorekeeper_036.jpg",
+      "tags": [
+        "挥手",
+        "打招呼"
+      ],
+      "mood": "wave",
+      "source": "shared",
+      "originalName": "056_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_037",
+      "file": "st_shorekeeper_037.jpg",
+      "tags": [
+        "困",
+        "睡着",
+        "疲惫"
+      ],
+      "mood": "sleep",
+      "source": "shared",
+      "originalName": "065_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_038",
+      "file": "st_shorekeeper_038.jpg",
+      "tags": [
+        "礼物",
+        "送你",
+        "惊喜"
+      ],
+      "mood": "gift",
+      "source": "shared",
+      "originalName": "071_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_039",
+      "file": "st_shorekeeper_039.jpg",
+      "tags": [
+        "加油",
+        "鼓劲",
+        "你可以的"
+      ],
+      "mood": "cheer",
+      "source": "shared",
+      "originalName": "083_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_040",
+      "file": "st_shorekeeper_040.jpg",
+      "tags": [
+        "开心",
+        "坐着笑"
+      ],
+      "mood": "happy",
+      "source": "shared",
+      "originalName": "088_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_041",
+      "file": "st_shorekeeper_041.jpg",
+      "tags": [
+        "害羞",
+        "捂脸"
+      ],
+      "mood": "shy",
+      "source": "shared",
+      "originalName": "089_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_042",
+      "file": "st_shorekeeper_042.jpg",
+      "tags": [
+        "生气",
+        "不满",
+        "无语",
+        "汗"
+      ],
+      "mood": "angry",
+      "source": "shared",
+      "originalName": "090_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_043",
+      "file": "st_shorekeeper_043.jpg",
+      "tags": [
+        "大哭",
+        "崩溃",
+        "呜"
+      ],
+      "mood": "cry",
+      "source": "shared",
+      "originalName": "091_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_044",
+      "file": "st_shorekeeper_044.jpg",
+      "tags": [
+        "难过",
+        "低落",
+        "不开心"
+      ],
+      "mood": "sad",
+      "source": "shared",
+      "originalName": "093_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_045",
+      "file": "st_shorekeeper_045.jpg",
+      "tags": [
+        "害羞",
+        "脸红"
+      ],
+      "mood": "shy",
+      "source": "shared",
+      "originalName": "095_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_046",
+      "file": "st_shorekeeper_046.jpg",
+      "tags": [
+        "惊讶",
+        "张嘴",
+        "惊"
+      ],
+      "mood": "shock",
+      "source": "shared",
+      "originalName": "098_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_047",
+      "file": "st_shorekeeper_047.jpg",
+      "tags": [
+        "委屈",
+        "难受"
+      ],
+      "mood": "sad",
+      "source": "shared",
+      "originalName": "100_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_048",
+      "file": "st_shorekeeper_048.jpg",
+      "tags": [
+        "蛋糕",
+        "生日",
+        "庆祝"
+      ],
+      "mood": "cake",
+      "source": "shared",
+      "originalName": "101_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_049",
+      "file": "st_shorekeeper_049.jpg",
+      "tags": [
+        "礼物",
+        "送给你"
+      ],
+      "mood": "gift",
+      "source": "shared",
+      "originalName": "103_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_050",
+      "file": "st_shorekeeper_050.jpg",
+      "tags": [
+        "花",
+        "送你花",
+        "浪漫"
+      ],
+      "mood": "flower",
+      "source": "shared",
+      "originalName": "110_SK_00001_.png"
+    },
+    {
+      "id": "st_shared_051",
+      "file": "st_shorekeeper_051.jpg",
+      "tags": [
+        "比心",
+        "喜欢"
+      ],
+      "mood": "heart",
+      "source": "shared",
+      "originalName": "121_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_052",
+      "file": "st_shorekeeper_052.jpg",
+      "tags": [
+        "困",
+        "睡"
+      ],
+      "mood": "sleep",
+      "source": "shared",
+      "originalName": "124_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_053",
+      "file": "st_shorekeeper_053.jpg",
+      "tags": [
+        "坐着",
+        "平静"
+      ],
+      "mood": "calm",
+      "source": "shared",
+      "originalName": "125_SK_00002_.png"
+    },
+    {
+      "id": "st_shared_054",
+      "file": "st_shorekeeper_054.jpg",
+      "tags": [
+        "托腮",
+        "思考"
+      ],
+      "mood": "think",
+      "source": "shared",
+      "originalName": "670a4aad-f13b-4dd7-b234-eedc1f140047.png"
+    },
+    {
+      "id": "st_shared_055",
+      "file": "st_shorekeeper_055.jpg",
+      "tags": [
+        "叉腰",
+        "得意",
+        "我可是"
+      ],
+      "mood": "akimbo",
+      "source": "shared",
+      "originalName": "a0a25f7d-d11b-49e0-9b65-b2da09ed1579.png"
+    },
+    {
+      "id": "st_shared_056",
+      "file": "st_shorekeeper_056.jpg",
+      "tags": [
+        "比心",
+        "爱你"
+      ],
+      "mood": "heart",
+      "source": "shared",
+      "originalName": "b1439bf3-8018-4c84-b77b-fccbe0a3b377.png"
+    },
+    {
+      "id": "st_shared_057",
+      "file": "st_shorekeeper_057.jpg",
+      "tags": [
+        "弹琴",
+        "钢琴",
+        "演奏"
+      ],
+      "mood": "piano",
+      "source": "shared",
+      "originalName": "fd39e7c2-9469-4753-bbaf-52fc446bb2ec.png"
+    }
+  ]
+}

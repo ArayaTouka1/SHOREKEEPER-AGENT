@@ -1,0 +1,11 @@
+const { app, BrowserWindow } = require('electron')
+const path = require('node:path')
+if (!process.env.WORKSPACE_TEST_PROFILE) throw new Error('Missing isolated profile')
+const resources = path.resolve(__dirname, '../release/win-unpacked/resources')
+app.setPath('userData', process.env.WORKSPACE_TEST_PROFILE)
+app.setPath('sessionData', process.env.WORKSPACE_TEST_PROFILE)
+app.setAppPath(path.join(resources, 'app.asar'))
+Object.defineProperty(process, 'resourcesPath', { value: resources })
+app.disableHardwareAcceleration()
+BrowserWindow.prototype.show = function () {}
+require(path.join(resources, 'app.asar/out/main/index.js'))

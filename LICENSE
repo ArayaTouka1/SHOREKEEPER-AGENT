@@ -1,0 +1,74 @@
+MIT License
+
+Copyright (c) 2026 shorekeeper
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+## 第三方内容与商标声明 / Third-Party Notices
+
+本项目的源代码以 MIT 许可发布，但**内置的角色相关内容不属于 MIT 许可范围**。
+
+The source code is MIT-licensed, but the bundled character-related assets are
+NOT covered by the MIT License.
+
+### 角色形象与人格设定
+
+内置角色源自以下作品的同人二次创作，相关权利归原权利方所有：
+
+- 《鸣潮》(Wuthering Waves) —— 库洛游戏 (Kuro Games)
+  - 角色：守岸人 (Shorekeeper)、爱弥斯 (Aemeath)
+- 《崩坏：星穹铁道》(Honkai: Star Rail) —— 米哈游 (HoYoverse)
+  - 角色：流萤 (Firefly)
+- 《秋之回忆 6》(Memories Off 6) —— KID / 5pb.
+  - 角色：嘉神川克罗艾 (Kasenagawa Chloe)
+
+相关角色名称、头像、语音与人格文本的版权归原权利方所有。
+本项目为**非官方同人作品**，与原作品权利方无任何隶属、赞助或授权关系，
+**不用于任何商业用途**。
+
+### 内置资源说明
+
+以下目录中的内容仅供个人学习与体验，请勿二次分发或用于商业场景：
+
+| 目录 | 内容 | 权利归属 |
+|---|---|---|
+| `resources/voices/` | 角色语音包（预录音频） | 原作品权利方 |
+| `resources/opus/` | 角色预录台词（各 120 条，用于主动问候） | 原作品权利方 |
+| `resources/qwen3voices/` | 角色参考音色（用于本地 TTS 克隆） | 原作品权利方 |
+| `resources/stickers/` | 角色表情包 | 原作品权利方 |
+| `resources/splash/` | 开屏动画 | 原作品权利方 |
+| `resources/cards/` | 角色卡（chara_card_v2） | 原作品权利方 |
+| `resources/personas/` | 人格文本 | 原作品权利方 |
+
+### 开源依赖
+
+| 依赖 | 许可 |
+|---|---|
+| Electron / electron-vite / Vite / React | MIT |
+| Qwen3-TTS ONNX 框架（zukky/Qwen3-TTS-ONNX-DLL） | Apache-2.0 |
+| ONNX Runtime (Microsoft) | MIT |
+| pdfjs-dist / JSZip / lucide-react 等 | 各自开源许可 |
+
+模型权重**不随本仓库分发**，由使用者自行获取，遵循其原始发布页的许可条款。
+
+### 侵权处理
+
+若权利方认为本项目内容侵犯其权益，请通过 Issue 联系，我们会第一时间移除相关内容。

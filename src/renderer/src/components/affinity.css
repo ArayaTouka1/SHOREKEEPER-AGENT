@@ -1,0 +1,19 @@
+.affinity-panel { padding: 20px 0; border-block: 1px solid var(--stroke); min-width: 0; }
+.affinity-heading { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.affinity-heading h3 { font-size: 16px; font-weight: 600; margin: 0; }
+.affinity-heading strong { margin-left: auto; font-size: 14px; color: var(--accent); }
+.affinity-panel p { color: var(--text-3); font-size: 13px; margin: 12px 0 18px; }
+.affinity-stages { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 14px; color: var(--accent); font-weight: 600; }
+.affinity-stages [aria-current] { color: var(--accent); font-weight: 600; }
+.affinity-panel progress { display: block; width: 100%; height: 6px; border: 0; accent-color: var(--accent); }
+.affinity-panel progress::-webkit-progress-bar { background: var(--stroke); border-radius: 3px; }
+.affinity-panel progress::-webkit-progress-value { background: var(--accent); border-radius: 3px; }
+.affinity-details { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-3); margin-top: 10px; }
+.affinity-details span, .affinity-badge { display: inline-flex; align-items: center; gap: 6px; }
+.affinity-badge { font-size: 12px; color: var(--accent); white-space: nowrap; }
+.character-profile { max-width: 780px; min-width: 0; }
+.character-profile h3 { font-size: 16px; margin: 20px 0 12px; }
+.character-profile dl { display: grid; grid-template-columns: 85px minmax(0,1fr); gap: 12px; font-size: 13px; }
+.character-profile dt { color: var(--text-3); }
+.character-profile dd { margin: 0; overflow-wrap: anywhere; }
+.character-profile blockquote { margin: 16px 0; padding: 8px 14px; border-left: 2px solid var(--accent); line-height: 1.8; font-size: 14px; }

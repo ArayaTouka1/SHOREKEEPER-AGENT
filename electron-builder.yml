@@ -1,0 +1,106 @@
+appId: com.shorekeeper.agent
+productName: 守岸人陪伴终端
+copyright: Copyright © 2026 shorekeeper
+
+extraMetadata:
+  version: 0.21.0
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/main/**/*
+  - out/preload/**/*
+  - out/renderer/**/*
+  - package.json
+  - '!**/*.map'
+  - '!**/.env*'
+  - '!**/*.{log,sqlite,db,pem,pfx}'
+  - '!**/{.verification,userData,uploads,conversations}/**'
+  - '!node_modules/**/{test,__tests__,docs,example,examples}/**'
+
+extraResources:
+  - from: ../icon.png
+    to: icon.png
+  - from: ../人设
+    to: persona-profiles
+    filter:
+      - '**/*.md'
+      - '!**/*_MEMORY.md'
+      - '!**/*_STATE.md'
+  - from: resources/voices
+    to: voices
+    filter:
+      - '**/*'
+  - from: resources/personas
+    to: personas
+    filter:
+      - '**/*'
+  - from: resources/cards
+    to: cards
+    filter:
+      - '**/*'
+  - from: resources/plugins
+    to: plugins
+    filter:
+      - '**/*'
+  - from: resources/stickers
+    to: stickers
+    filter:
+      - '**/*'
+  - from: resources/qwen3tts
+    to: qwen3tts
+    filter:
+      - '**/*'
+  # Public reference audio only; personal recordings and model weights are excluded.
+  - from: resources/qwen3voices
+    to: qwen3voices
+    filter:
+      - voices.json
+      - shorekeeper.wav
+      - aemeath.wav
+      - firefly.wav
+      - chloe.wav
+  - from: resources/opus
+    to: opus
+    filter:
+      - '**/*'
+  - from: resources/splash
+    to: splash
+    filter:
+      - opening.mp4
+
+asar: true
+afterPack: scripts/audit-package.cjs
+compression: maximum
+electronLanguages:
+  - zh-CN
+  - en-US
+
+win:
+  icon: ../icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 守岸人陪伴终端
+  deleteAppDataOnUninstall: false
+  installerLanguages:
+    - zh_CN
+  language: '2052'
+
+portable:
+  artifactName: ${productName}-${version}-${arch}-portable.${ext}

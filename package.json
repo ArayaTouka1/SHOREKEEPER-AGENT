@@ -1,0 +1,53 @@
+{
+  "name": "shorekeeper-agent",
+  "version": "0.21.0",
+  "description": "守岸人陪伴终端 —— AI 角色陪伴 + 本机操作 Agent 桌面客户端",
+  "main": "./out/main/index.js",
+  "author": "shorekeeper",
+  "license": "MIT",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "pack": "electron-vite build && node scripts/dist.cjs --dir",
+    "dist": "electron-vite build && node scripts/dist.cjs",
+    "verify:chat-flow": "node scripts/verify-chat-flow.cjs",
+    "verify:package": "node scripts/audit-package.cjs && node scripts/verify-clean-package.cjs",
+    "verify:relationships": "node scripts/verify-relationships.cjs",
+    "verify:relationships-ui": "node scripts/verify-relationships-ui.cjs",
+    "verify:fs": "node scripts/verify-fs-tools.cjs",
+    "verify:workspace": "node scripts/verify-workspace.cjs",
+    "verify:workspace-ui": "node scripts/verify-workspace-ui.cjs",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.20.4",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "pdf-lib": "^1.17.1",
+    "pptxgenjs": "^4.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
+  },
+  "dependencies": {
+    "docx-preview": "^0.4.1",
+    "exceljs": "^4.4.0",
+    "fast-xml-parser": "^5.11.1",
+    "jszip": "^3.10.2",
+    "lucide-react": "^1.48.0",
+    "minimatch": "^10.2.6",
+    "papaparse": "^5.7.0",
+    "pdfjs-dist": "^4.10.38",
+    "pptx-preview": "^1.0.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
+  }
+}

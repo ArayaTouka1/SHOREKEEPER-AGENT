@@ -1,0 +1,34 @@
+{
+  "_comment": "Qwen3-TTS 内置参考音色索引。refText 留空表示「参考音频里说的那句话」需要用户在设置页自己填 —— 填得越准，克隆越像。",
+  "sampleRate": 24000,
+  "voices": [
+    {
+      "id": "shorekeeper",
+      "name": "守岸人",
+      "file": "shorekeeper.wav",
+      "format": "wav",
+      "refText": ""
+    },
+    {
+      "id": "aemeath",
+      "name": "爱弥斯",
+      "file": "aemeath.wav",
+      "format": "wav",
+      "refText": ""
+    },
+    {
+      "id": "firefly",
+      "name": "流萤",
+      "file": "firefly.wav",
+      "format": "wav",
+      "refText": ""
+    },
+    {
+      "id": "chloe",
+      "name": "克罗艾",
+      "file": "chloe.wav",
+      "format": "wav",
+      "refText": ""
+    }
+  ]
+}
