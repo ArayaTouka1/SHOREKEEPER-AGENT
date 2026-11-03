@@ -1,4 +1,3 @@
-import OperationApproval from './components/OperationApproval'
 import React, { useEffect, useState } from 'react'
 import { useApp } from './store/AppStore'
 import { applyTheme } from './hooks/useTheme'
@@ -8,15 +7,14 @@ import Rail from './components/Rail'
 import CommandPalette from './components/CommandPalette'
 import BackgroundLayer from './components/BackgroundLayer'
 import CloseDialog from './components/CloseDialog'
-import HomePage from './pages/HomePage'
-import ChatPage from './pages/ChatPage'
-import MemoryPage from './pages/MemoryPage'
-import TaskPage from './pages/TaskPage'
-import AgentPage from './pages/AgentPage'
-import SettingsPage from './pages/SettingsPage'
 import DocumentPreview from './components/DocumentPreview'
+import PluginRuntime from './components/PluginRuntime'
+import PageHost from './components/PageHost'
+import { isRoute, routeForShortcut, type Route } from './ui/navigation'
+import CallWindow from './pages/CallWindow'
+import CallRenderPreview from './pages/CallRenderPreview'
 
-export type Route = 'home' | 'chat' | 'memory' | 'task' | 'agent' | 'settings'
+export type { Route } from './ui/navigation'
 
 export default function App(): React.ReactElement {
   const { ready, bootError, settings, activeTokens, theme, refreshJobs, character } = useApp()
@@ -46,9 +44,7 @@ export default function App(): React.ReactElement {
 
   useEffect(() => {
     const off = window.aimis.agent.onNavigate((r) => {
-      if (['home', 'chat', 'memory', 'task', 'agent', 'settings'].includes(r)) {
-        setRoute(r as Route)
-      }
+      if (isRoute(r)) setRoute(r)
     })
     return off
   }, [])
@@ -61,15 +57,7 @@ export default function App(): React.ReactElement {
         setPaletteOpen((v) => !v)
         return
       }
-      const map: Record<string, Route> = {
-        '1': 'home',
-        '2': 'chat',
-        '3': 'memory',
-        '4': 'task',
-        '5': 'agent',
-        '6': 'settings'
-      }
-      const target = map[e.key]
+      const target = routeForShortcut(e.key)
       if (target) {
         e.preventDefault()
         setRoute(target)
@@ -108,6 +96,13 @@ export default function App(): React.ReactElement {
     )
   }
 
+  if (new URLSearchParams(window.location.search).get('view') === 'call') {
+    return <CallWindow />
+  }
+  if (new URLSearchParams(window.location.search).get('view') === 'call-render-preview') {
+    return <CallRenderPreview />
+  }
+
   return (
     <div className="app-shell">
       <BackgroundLayer />
@@ -116,32 +111,13 @@ export default function App(): React.ReactElement {
 
       <Rail route={route} onNavigate={setRoute} onOpenPalette={() => setPaletteOpen(true)} />
 
-      {/* ChatPage 常驻：始终挂载，非激活时用 display 隐藏，切页不打断对话/语音。
-          主动问候由 active 驱动 —— 只有真正进入对话页才会问候并播放语音。 */}
-      <div
-        className="main-area"
-        style={route === 'chat' ? undefined : { display: 'none' }}
-        data-testid="chat-host"
-      >
-        <ChatPage active={route === 'chat'} />
-      </div>
-
-      {/* 其它页面按路由条件挂载（key 触发 route-fade 入场动画） */}
-      {route !== 'chat' && (
-        <div className="main-area" key={route}>
-          {route === 'home' && <HomePage onNavigate={setRoute} />}
-          {route === 'memory' && <MemoryPage />}
-          {route === 'task' && <TaskPage onNavigate={setRoute} />}
-          {route === 'agent' && <AgentPage />}
-          {route === 'settings' && <SettingsPage />}
-        </div>
-      )}
+      <PageHost route={route} onNavigate={setRoute} />
 
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onNavigate={setRoute} />
       <CloseDialog open={closeOpen} onClose={() => setCloseOpen(false)} />
       <AppToast />
       <DocumentPreview />
-      <OperationApproval />
+      <PluginRuntime />
     </div>
   )
 }

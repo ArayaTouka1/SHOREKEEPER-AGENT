@@ -13,6 +13,9 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import Affinity from '../components/Affinity'
 import PermissionBadge from '../components/PermissionBadge'
+import ChatBubble from './chat/ChatBubble'
+import { ApprovalCard as ModularApprovalCard, ToolCard as ModularToolCard } from './chat/ToolCards'
+import './chat/chat.css'
 
 const STATE_MAP: Record<ToolPermissionState, { label: string; cls: string }> = {
   idle: { label: '待命', cls: '' },
@@ -191,7 +194,6 @@ function Bubble({
                     src={src}
                     alt={img.alt ?? ''}
                     className={img.sticker ? 'msg-sticker' : ''}
-                    title={img.sticker ? `表情包 · ${img.mood ?? ''}` : (img.name ?? '')}
                     loading="lazy"
                   />
                 )
@@ -209,11 +211,10 @@ function Bubble({
                     src={toLocalUrl(att.path)}
                     alt={att.name}
                     className="msg-attach-image"
-                    title={att.name}
                     loading="lazy"
                   />
                 ) : (
-                  <button key={i} className="msg-attach-file" title={att.path} onClick={() => previewDocument(att.path)}>
+                  <button key={i} className="msg-attach-file" aria-label={att.path} onClick={() => previewDocument(att.path)}>
                     <span className="msg-attach-icon">{iconForAtt(att)}</span>
                     <div className="msg-attach-meta">
                       <span className="msg-attach-name truncate">{att.name}</span>
@@ -228,13 +229,13 @@ function Bubble({
 
         {!isUser && msg.text && (
           <div style={{ display: 'flex', gap: 4, paddingLeft: 2 }}>
-            <button className="msg-action" onClick={() => onSpeak(msg.text)} title="朗读">
+            <button className="msg-action" onClick={() => onSpeak(msg.text)} aria-label="朗读">
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                 <path d="M3 6v4h2.5L9 13V3L5.5 6H3z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" />
                 <path d="M11.2 5.6a3 3 0 010 4.8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
               </svg>
             </button>
-            <button className="msg-action" onClick={copy} title="复制">
+            <button className="msg-action" onClick={copy} aria-label="复制">
               {copied ? (
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
                   <path d="M3.5 8.5l3 3 6-6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
@@ -377,9 +378,11 @@ function ApprovalCard({
 
 export default function ChatPage({ active = true }: { active?: boolean } = {}): React.ReactElement {
   const {
+    settings,
     character,
     conversations,
     activeConversationId,
+    refreshMessages,
     messages,
     streamingText,
     awaitingText,
@@ -396,6 +399,7 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
     activeModelId,
     workspace,
     pickWorkspace,
+    refreshAttachments,
     setSyncRatio,
     greetOnEntry,
     pushToast
@@ -404,13 +408,15 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
   const [input, setInput] = useState('')
   const [search, setSearch] = useState('')
   const [muted, setMuted] = useState(false)
+  const [callWindowActive, setCallWindowActive] = useState(false)
   const [pendingAtts, setPendingAtts] = useState<Attachment[]>([])
+  const [draggingFiles, setDraggingFiles] = useState(false)
   const [stickerOpen, setStickerOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [goalOpen, setGoalOpen] = useState(true)
-  const [goalVisible, setGoalVisible] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const { speak, stop, supported, mode, lastError, onProgress } = useSpeech()
+
+  useEffect(() => window.aimis.call.onState(setCallWindowActive), [])
 
   useEffect(() => () => setSyncRatio(1), [setSyncRatio])
 
@@ -438,14 +444,60 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
     }
   }, [active, greetOnEntry])
 
+  useEffect(() => {
+    if (!active || !activeConversationId || busy) return
+    let timer = 0
+    let triggered = false
+    let generating = false
+
+    const schedule = (): void => {
+      window.clearTimeout(timer)
+      if (triggered || generating || document.visibilityState !== 'visible') return
+      const delay = (9 + Math.random() * 2) * 60_000
+      timer = window.setTimeout(() => {
+        triggered = true
+        generating = true
+        void window.aimis.chat.proactive(activeConversationId)
+          .then(async (result) => {
+            if (result.ok && result.data) await refreshMessages(activeConversationId)
+          })
+          .catch((error) => console.warn('闲置问候未能发送：', error))
+          .finally(() => { generating = false })
+      }, delay)
+    }
+    const onActivity = (): void => {
+      triggered = false
+      schedule()
+    }
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'visible') onActivity()
+      else window.clearTimeout(timer)
+    }
+
+    schedule()
+    window.addEventListener('pointerdown', onActivity)
+    window.addEventListener('keydown', onActivity)
+    window.addEventListener('wheel', onActivity, { passive: true })
+    window.addEventListener('touchstart', onActivity, { passive: true })
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.clearTimeout(timer)
+      window.removeEventListener('pointerdown', onActivity)
+      window.removeEventListener('keydown', onActivity)
+      window.removeEventListener('wheel', onActivity)
+      window.removeEventListener('touchstart', onActivity)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [active, activeConversationId, busy, refreshMessages])
+
   const syncRatioRef = useRef(1)
   useEffect(() => {
-    setAutoSpeak((text) => {
-      if (muted || mode === 'off' || !autoSpeakOn) return
-      speak(text)
-    })
+    setAutoSpeak((text, forceSpeak = false) => {
+      if ((callWindowActive && !forceSpeak) || muted || mode === 'off' || (!autoSpeakOn && !forceSpeak)) return Promise.resolve(false)
+      return speak(text)
+    }, !muted && mode !== 'off' && (character?.voice.autoSpeak ?? true) && !callWindowActive)
     return () => setAutoSpeak(null)
-  }, [setAutoSpeak, speak, supported, muted, mode, character?.voice.autoSpeak])
+  }, [setAutoSpeak, speak, supported, muted, mode, character?.voice.autoSpeak, callWindowActive])
 
   useEffect(() => {
     onProgress((p) => {
@@ -469,7 +521,12 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
   }, [syncText])
 
   /**
+   * 聊天与协作已整合 —— 不再分两个 Tab。
+   * 工具调用卡片直接内联在聊天流里，跟消息一起滚动。
    *
+   * 语音逐字同步时隐藏「刚入库的完整回复」：
+   * store 在 done 时已经 refreshMessages 把完整文本拉进来了，
+   * 如果这里照常渲染，会跟同步气泡重复显示。
    */
   const visible = useMemo(() => {
     if (!syncText) return messages
@@ -511,6 +568,35 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
     }
   }
 
+  const hasDroppedFiles = (event: React.DragEvent): boolean =>
+    Array.from(event.dataTransfer.types).includes('Files')
+
+  const dropAttachments = async (event: React.DragEvent<HTMLDivElement>): Promise<void> => {
+    event.preventDefault()
+    setDraggingFiles(false)
+    const files = Array.from(event.dataTransfer.files)
+    if (!files.length) return
+
+    const imported: Attachment[] = []
+    for (const file of files) {
+      try {
+        const result = await window.aimis.attachment.importDropped(file)
+        if (result?.ok && result.data) imported.push(result.data.attachment)
+        else if (result && !result.ok) pushToast({ ok: false, text: result.error ?? `无法添加文件：${file.name}` })
+      } catch (error) {
+        pushToast({ ok: false, text: `无法添加文件：${file.name}（${error instanceof Error ? error.message : String(error)}）` })
+      }
+    }
+    if (imported.length) {
+      await refreshAttachments()
+      setPendingAtts((current) => {
+        const ids = new Set(current.map((attachment) => attachment.id))
+        return [...current, ...imported.filter((attachment) => !ids.has(attachment.id))]
+      })
+      pushToast({ ok: true, text: `已添加 ${imported.length} 个附件` })
+    }
+  }
+
   const sendSticker = async (s: { path: string; dataUrl: string; name: string; mood: string }): Promise<void> => {
     if (busy) return
     stop()
@@ -537,22 +623,28 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
     : '新对话'
 
   const autoSpeakOn = character?.voice.autoSpeak ?? true
+  const chatAppearance = settings?.chat.appearance ?? {
+    bubbleStyle: 'resonance' as const,
+    showCharacterAvatar: true,
+    showUserAvatar: true,
+    userAvatar: ''
+  }
 
   return (
     <>
-      <div className="page-head" data-speech-mode={mode}>
+      <div className="page-head chat-page-head" data-speech-mode={mode}>
         <div>
-          <div className="page-crumb">对话 / {activeTitle}</div>
-          <div className="page-title">和{name}一起完成</div>
+          <div className="page-title chat-character-title">{name}</div>
+          <div className="chat-character-subtitle">{name === '守岸人' ? '黑海岸接引人，嗯……代行中' : character?.latinName}</div>
         </div>
         <div className="row" style={{ gap: 10 }}>
           <Affinity compact />
           <PersonaSwitcher />
           <ModelSelector />
+          <PermissionBadge compact placement="bottom" />
           {supported && (
             <button
               className="btn sm"
-              title={muted ? '当前静音，点击恢复自动朗读' : autoSpeakOn ? '回复会自动朗读' : '自动朗读已关闭'}
               onClick={() => {
                 if (muted) {
                   setMuted(false)
@@ -571,7 +663,7 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
           <button
             className="btn sm"
             data-testid="workspace-btn"
-            title={workspace ? `工作目录：${workspace}` : '点这里选一个工作目录'}
+            aria-label={workspace ? `工作目录：${workspace}` : '点这里选一个工作目录'}
             onClick={async () => {
               const p = await pickWorkspace()
               if (p) pushToast({ ok: true, text: '工作目录已设为 ' + p })
@@ -583,72 +675,28 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
         </div>
       </div>
 
-      <div className="page-body">
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
-          {/*
-            收起后的圆形模块 —— 固定在对话页右上角。
-            点「隐藏」后卡片不会消失，而是收成这个圆形小模块悬浮在右上角。
-          */}
-          {!goalVisible && (
-            <button
-              className="goal-fab"
-              data-testid="goal-fab"
-              title="展开「当前目标」卡片"
-              onClick={() => setGoalVisible(true)}
-            >
-              ◈
-            </button>
-          )}
-
-          {/* 目标条 —— 可完全隐藏（隐藏后收成右上角圆形模块） */}
-          {goalVisible && (
-            <div style={{ padding: '16px 32px 0' }}>
-              <div className="card card-pad" style={{ padding: '12px 16px' }}>
-                <div
-                  className="row"
-                  style={{ justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}
-                  data-testid="goal-toggle"
-                  onClick={() => setGoalOpen((v) => !v)}
-                >
-                  <div className="row" style={{ gap: 8, minWidth: 0 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-4)' }}>{goalOpen ? '▾' : '▸'}</span>
-                    <span className="card-title" style={{ marginBottom: 0, fontSize: 13 }}>
-                      当前目标
-                    </span>
-                    {!goalOpen && (
-                      <span className="truncate" style={{ fontSize: 12.5, color: 'var(--text-3)' }}>
-                        {currentTool ? `当前工具：${currentTool.actionLabel}` : '等待你提出一个请求'}
-                      </span>
-                    )}
-                  </div>
-                  <div className="row" style={{ gap: 8, flexShrink: 0 }}>
-                    {/* 完全权限按钮已按需求移除 —— 只在输入栏旁保留一个 */}
-                    <StatusInline state={currentTool ? currentTool.state : 'idle'} />
-                    <button
-                      className="btn ghost sm"
-                      data-testid="goal-hide"
-                      title="收起成右上角圆形模块"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        setGoalVisible(false)
-                      }}
-                      style={{ fontSize: 10.5, padding: '2px 8px' }}
-                    >
-                      隐藏
-                    </button>
-                  </div>
-                </div>
-
-                {goalOpen && (
-                  <div style={{ marginTop: 10, fontSize: 15 }} data-testid="goal-body">
-                    {currentTool ? `当前工具：${currentTool.actionLabel}` : '等待你提出一个请求'}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: '22px 32px 8px' }}>
+      <div
+        className={`page-body chat-page-body${draggingFiles ? ' is-file-dragging' : ''}`}
+        style={{ '--bubble-user': `linear-gradient(110deg, ${settings?.chat.appearance.userBubbleFrom ?? '#123e79'}, ${settings?.chat.appearance.userBubbleTo ?? '#123054'})`, '--bubble-char': settings?.chat.appearance.characterBubble ?? '#f5fafc' } as React.CSSProperties}
+        onDragEnter={(event) => {
+          if (!hasDroppedFiles(event)) return
+          event.preventDefault()
+          setDraggingFiles(true)
+        }}
+        onDragOver={(event) => {
+          if (!hasDroppedFiles(event)) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+        }}
+        onDragLeave={(event) => {
+          if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+          setDraggingFiles(false)
+        }}
+        onDrop={(event) => void dropAttachments(event)}
+      >
+        {draggingFiles && <div className="chat-drop-overlay" aria-hidden="true"><span>释放文件以添加到对话</span></div>}
+        <div className="chat-stage" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+          <div ref={scrollRef} className="chat-scroll" style={{ flex: 1, overflowY: 'auto', padding: '22px 32px 8px' }}>
             {visible.length === 0 && !streamingText && (
               <div className="empty">
                 <div className="empty-glyph">◇</div>
@@ -667,22 +715,23 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
                   'shell_run', 'shell_job', 'job_kill', 'job_output', 'launch_app', 'app_close'
                 ]
                 if (silent.includes(m.toolCall.name) && m.toolCall.state !== 'failed' && m.toolCall.state !== 'denied' && m.toolCall.state !== 'waiting') return null
-                return <ToolCard key={m.id} tool={m.toolCall} />
+                return <ModularToolCard key={m.id} tool={m.toolCall} />
               }
-              return <Bubble key={m.id} msg={m} characterName={name} avatar={character?.avatar.main} onSpeak={speak} />
+              return <ChatBubble key={m.id} msg={m} characterName={name} avatar={character?.avatar.main} onSpeak={speak} {...chatAppearance} />
             })}
 
             {pendingTool && (
               <div style={{ maxWidth: 640 }}>
-                <ApprovalCard tool={pendingTool} onDecide={(ok) => void approveTool(pendingTool.id, ok)} />
+                <ModularApprovalCard tool={pendingTool} onDecide={(ok) => void approveTool(pendingTool.id, ok)} />
               </div>
             )}
 
             {streamingText && (
-              <div style={{ display: 'flex', gap: 12, marginBottom: 20, alignItems: 'flex-start' }}>
-                <Avatar src={character?.avatar.main} size={42} />
+              <div className={`chat-message is-character style-${chatAppearance.bubbleStyle}`} style={{ display: 'flex', gap: 12, marginBottom: 20, alignItems: 'flex-start' }}>
+                {chatAppearance.showCharacterAvatar && <Avatar src={character?.avatar.main} size={54} />}
                 <div style={{ maxWidth: 'min(680px, 74%)' }}>
                   <div
+                    className="chat-speaker-name"
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -696,6 +745,7 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
                     {name}
                   </div>
                   <div
+                    className="chat-message-bubble"
                     style={{
                       padding: '13px 17px',
                       borderRadius: 18,
@@ -721,10 +771,11 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
               这样「读到的字」和「听到的声音」是对齐的。
             */}
             {syncText && syncRatio > 0 && (
-              <div style={{ display: 'flex', gap: 12, marginBottom: 20, alignItems: 'flex-start' }}>
-                <Avatar src={character?.avatar.main} size={42} />
+              <div className={`chat-message is-character style-${chatAppearance.bubbleStyle}`} style={{ display: 'flex', gap: 12, marginBottom: 20, alignItems: 'flex-start' }}>
+                {chatAppearance.showCharacterAvatar && <Avatar src={character?.avatar.main} size={54} />}
                 <div style={{ maxWidth: 'min(680px, 74%)' }}>
                   <div
+                    className="chat-speaker-name"
                     style={{
                       display: 'flex',
                       alignItems: 'center',
@@ -739,6 +790,7 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
                   </div>
                   <div
                     data-testid="sync-bubble"
+                    className="chat-message-bubble"
                     style={{
                       padding: '13px 17px',
                       borderRadius: 18,
@@ -759,9 +811,10 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
             )}
 
             {busy && !streamingText && (
-              <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20 }}>
-                <Avatar src={character?.avatar.main} size={42} />
+              <div className={`chat-message is-character style-${chatAppearance.bubbleStyle}`} style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20 }}>
+                {chatAppearance.showCharacterAvatar && <Avatar src={character?.avatar.main} size={54} />}
                 <div
+                  className="chat-message-bubble"
                   style={{
                     padding: '12px 18px',
                     borderRadius: 18,
@@ -780,24 +833,12 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
             )}
           </div>
 
-          {/* 泰提斯审核提示 —— 固定在输入框上方（下方），左右横线居中样式 */}
-          {(awaitingText || (syncText && syncRatio === 0)) && (
-            <div className="tethys-divider" data-testid="tethys-review">
-              <span className="tethys-line" />
-              <span className="tethys-icon">🛰️</span>
-              <span className="tethys-text">信息由泰提斯系统审核中</span>
-              <span className="tethys-dots">
-                <span />
-                <span />
-                <span />
-              </span>
-              <span className="tethys-icon">🌐</span>
-              <span className="tethys-line" />
-              {syncText && showFallback && (
+          <div className="chat-composer-wrap" style={{ padding: '12px 32px 22px' }}>
+            {syncText && showFallback && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
                 <button
                   className="btn ghost sm"
                   data-testid="tethys-fallback"
-                  style={{ marginLeft: 14 }}
                   onClick={() => {
                     stop()
                     setSyncRatio(1)
@@ -805,31 +846,28 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
                 >
                   仅查看文字
                 </button>
-              )}
-            </div>
-          )}
-
-          <div style={{ padding: '12px 32px 22px' }}>
+              </div>
+            )}
             <AttachmentChips
               items={pendingAtts}
               onRemove={(id) => setPendingAtts((prev) => prev.filter((x) => x.id !== id))}
             />
             <div
-              className="card"
+              className="card chat-composer"
               style={{
                 display: 'flex',
-                alignItems: 'flex-end',
+                alignItems: 'center',
                 gap: 10,
-                padding: '10px 12px 10px 16px',
+                padding: '10px 12px',
                 background: 'var(--glass-hover)'
               }}
             >
               <AttachmentPicker pending={pendingAtts} onChange={setPendingAtts} />
-              <div className="sticker-wrap">
+              <div className="sticker-wrap chat-composer-action">
                 <button
-                  className={`icon-btn ${stickerOpen ? 'on' : ''}`}
+                  className={`icon-btn chat-composer-control chat-composer-icon-control ${stickerOpen ? 'on' : ''}`}
                   data-testid="sticker-btn"
-                  title="表情包"
+                  aria-label="表情包"
                   onClick={() => setStickerOpen((v) => !v)}
                 >
                   ☺
@@ -863,12 +901,24 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
                   resize: 'none',
                   maxHeight: 140,
                   lineHeight: 1.7,
-                  paddingTop: 6,
+                  padding: '9px 4px',
                   userSelect: 'text'
                 }}
               />
+              {(['voice', 'video'] as const).map((callMode) => <button
+                key={callMode}
+                className="btn sm chat-composer-control chat-composer-call"
+                data-testid={callMode === 'voice' ? 'chat-call-voice' : 'chat-call'}
+                onClick={async () => {
+                  const result = await window.aimis.call.open(activeConversationId ?? undefined, callMode)
+                  if (!result.ok) pushToast({ ok: false, text: result.error ?? '无法打开角色通话窗口' })
+                }}
+                style={{ height: 40, flexShrink: 0 }}
+              >
+                {callMode === 'voice' ? '☎ 语音通话' : '◉ 视频通话'}
+              </button>)}
               <button
-                className="btn primary"
+                className="btn primary chat-composer-control chat-composer-send"
                 data-testid="chat-send"
                 style={{
                   height: 40,
@@ -883,7 +933,6 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
                 }}
                 onClick={() => void submit()}
                 disabled={busy || (!input.trim() && !pendingAtts.length)}
-                title={busy ? '正在回复…' : '发送'}
               >
                 {busy ? '…' : (
                   <>
@@ -891,7 +940,6 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
                   </>
                 )}
               </button>
-              <PermissionBadge />
             </div>
           </div>
         </div>
@@ -899,6 +947,7 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
         {/* 会话侧边栏 —— 可收起，收起后只留一条窄条 */}
         {sidebarOpen ? (
           <aside
+            className="chat-history-panel"
             style={{
               width: 272,
               flexShrink: 0,
@@ -913,14 +962,14 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
               <div className="row" style={{ justifyContent: 'space-between' }}>
                 <span style={{ fontSize: 12, color: 'var(--text-3)' }}>会话</span>
                 <div className="row" style={{ gap: 4 }}>
-                  <button className="btn ghost sm" onClick={() => void newConversation()} title="新建对话">
+                  <button className="btn ghost sm" onClick={() => void newConversation()}>
                     ＋
                   </button>
                   <button
                     className="btn ghost sm"
                     data-testid="sidebar-toggle"
                     onClick={() => setSidebarOpen(false)}
-                    title="收起侧边栏"
+                    aria-label="收起侧边栏"
                   >
                     ›
                   </button>
@@ -955,7 +1004,7 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
                     e.stopPropagation()
                     void deleteConversation(c.id)
                   }}
-                  title="删除会话"
+                  aria-label="删除会话"
                 >
                   ×
                 </button>
@@ -968,6 +1017,7 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
         </aside>
         ) : (
           <div
+            className="chat-history-rail"
             style={{
               width: 44,
               flexShrink: 0,
@@ -985,7 +1035,7 @@ export default function ChatPage({ active = true }: { active?: boolean } = {}): 
               className="btn ghost sm"
               data-testid="sidebar-toggle"
               onClick={() => setSidebarOpen(true)}
-              title="展开会话列表"
+              aria-label="展开会话列表"
             >
               ‹
             </button>

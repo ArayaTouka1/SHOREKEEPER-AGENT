@@ -38,17 +38,17 @@ export default function TitleBar(): React.ReactElement {
         </span>
       )}
 
-      <button className="titlebar-btn" data-testid="win-min" onClick={() => window.aimis.window.minimize()} title="最小化">
+      <button className="titlebar-btn" data-testid="win-min" onClick={() => window.aimis.window.minimize()} aria-label="最小化">
         <svg width="11" height="11" viewBox="0 0 11 11">
           <line x1="1" y1="5.5" x2="10" y2="5.5" stroke="currentColor" strokeWidth="1.1" />
         </svg>
       </button>
-      <button className="titlebar-btn" data-testid="win-max" onClick={() => window.aimis.window.maximize()} title="最大化">
+      <button className="titlebar-btn" data-testid="win-max" onClick={() => window.aimis.window.maximize()} aria-label="最大化">
         <svg width="11" height="11" viewBox="0 0 11 11">
           <rect x="1.2" y="1.2" width="8.6" height="8.6" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.1" />
         </svg>
       </button>
-      <button className="titlebar-btn close" data-testid="win-close" onClick={() => void onClose()} title="关闭">
+      <button className="titlebar-btn close" data-testid="win-close" onClick={() => void onClose()} aria-label="关闭">
         <svg width="11" height="11" viewBox="0 0 11 11">
           <line x1="1.6" y1="1.6" x2="9.4" y2="9.4" stroke="currentColor" strokeWidth="1.1" />
           <line x1="9.4" y1="1.6" x2="1.6" y2="9.4" stroke="currentColor" strokeWidth="1.1" />

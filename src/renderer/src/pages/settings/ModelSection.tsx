@@ -160,7 +160,6 @@ export default function ModelSection(): React.ReactElement {
           data-model-card={m.id}
           className="model-icon-card"
           onClick={() => usable && !isActive && void selectModel(m.id)}
-          title={`${m.name} · ${m.model}${!usable ? '（需先连接）' : ''}`}
           style={{
             opacity: usable ? 1 : 0.45,
             cursor: usable ? 'pointer' : 'not-allowed'
@@ -220,7 +219,6 @@ export default function ModelSection(): React.ReactElement {
             className="btn sm"
             disabled={!usable || isActive}
             onClick={() => void selectModel(m.id)}
-            title={!usable ? '本地模型需要先连接成功' : ''}
           >
             {isActive ? '已选中' : '设为当前模型'}
           </button>
@@ -232,7 +230,6 @@ export default function ModelSection(): React.ReactElement {
               data-testid={`disconnect-${m.id}`}
               disabled={probing === m.id}
               onClick={() => void doDisconnect(m)}
-              title="断开连接，断开后该模型不再出现在对话页"
             >
               {probing === m.id ? '断开中…' : '断开连接'}
             </button>
@@ -289,7 +286,6 @@ export default function ModelSection(): React.ReactElement {
         }
       />
 
-      {/* API 密钥卡片已删除：密钥的填写 / 保存 / 清空统一收在「AI 与 API」卡片里 */}
       {/* API 联网 —— 按厂商分组、可折叠 */}
       <div className="card card-pad" style={{ marginBottom: 18 }}>
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 12, gap: 10, flexWrap: 'wrap' }}>
@@ -310,7 +306,7 @@ export default function ModelSection(): React.ReactElement {
               <button
                 className="btn sm"
                 data-testid="model-view-icon"
-                title="小图标展示"
+                aria-label="小图标展示"
                 style={viewMode === 'icon' ? { background: 'var(--accent-grad)', color: '#fff' } : { background: 'transparent' }}
                 onClick={() => setViewMode('icon')}
               >
@@ -319,7 +315,7 @@ export default function ModelSection(): React.ReactElement {
               <button
                 className="btn sm"
                 data-testid="model-view-list"
-                title="列表展示"
+                aria-label="列表展示"
                 style={viewMode === 'list' ? { background: 'var(--accent-grad)', color: '#fff' } : { background: 'transparent' }}
                 onClick={() => setViewMode('list')}
               >
@@ -331,7 +327,6 @@ export default function ModelSection(): React.ReactElement {
               data-testid="model-expand-all"
               disabled={apiGroups.length === 0}
               onClick={toggleAll}
-              title={allExpanded ? '收起所有厂商分组' : '展开所有厂商分组'}
             >
               {allExpanded ? '全部收起' : '全部展开'}
             </button>
@@ -454,7 +449,6 @@ export default function ModelSection(): React.ReactElement {
                   className="btn sm danger"
                   data-testid="disconnect-all"
                   onClick={() => void disconnectAllModels()}
-                  title="断开所有本地模型的连接"
                 >
                   全部断开
                 </button>

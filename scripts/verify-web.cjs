@@ -14,7 +14,9 @@ rmSync(OUT, { recursive: true, force: true })
 mkdirSync(OUT, { recursive: true })
 const slash = (p) => p.replace(/\\/g, '/')
 
-const PROFILE = mkdtempSync(join(tmpdir(), 'sk-web-'))
+const PROFILE_ROOT = join(ROOT, '.verification')
+mkdirSync(PROFILE_ROOT, { recursive: true })
+const PROFILE = mkdtempSync(join(PROFILE_ROOT, 'sk-web-'))
 writeFileSync(
   join(PROFILE, 'stub.cjs'),
   `module.exports = {
@@ -23,6 +25,7 @@ writeFileSync(
     getAppPath: () => ${JSON.stringify(slash(ROOT))}, isPackaged: false, getVersion: () => '0.21.0'
   },
   shell: { openPath: async () => '', openExternal: async () => true },
+  net: { fetch: (...args) => fetch(...args) },
   dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
   ipcMain: { handle: () => {}, on: () => {} }, nativeImage: { createFromDataURL: () => ({}) },
   Tray: class {}, Menu: { buildFromTemplate: () => ({}) },
@@ -78,15 +81,17 @@ const check = (n, c, e) => { if (c) { pass++; console.log('  OK   ' + n) } else 
     console.log('    来源: ' + (sr?.source || '未知'))
   }
 
-  console.log('=== 3. 真实网页抓取 ===')
-  let fetchRes
-  try {
-    fetchRes = await mod.runAgentTool('web_fetch', { url: 'https://www.bing.com' })
-  } catch (e) {
-    fetchRes = { ok: false, error: e && e.message }
+  console.log('=== 3. 多站点真实网页抓取 ===')
+  for (const url of ['https://www.bing.com', 'https://example.com', 'https://github.com']) {
+    let fetchRes
+    try {
+      fetchRes = await mod.runAgentTool('web_fetch', { url })
+    } catch (e) {
+      fetchRes = { ok: false, error: e && e.message }
+    }
+    const fr = fetchRes && fetchRes.result ? fetchRes.result : fetchRes
+    check(`抓取返回正文：${new URL(url).hostname}`, !!(fr && fr.text && fr.text.length > 100), JSON.stringify({ ok: fetchRes?.ok, len: fr?.text?.length, err: fetchRes?.error }).slice(0, 200))
   }
-  const fr = fetchRes && fetchRes.result ? fetchRes.result : fetchRes
-  check('抓取返回正文', !!(fr && fr.text && fr.text.length > 100), JSON.stringify({ ok: fetchRes?.ok, len: fr?.text?.length, err: fetchRes?.error }).slice(0, 200))
 
   console.log('\n' + pass + '/' + (pass + fail) + ' 项通过')
 

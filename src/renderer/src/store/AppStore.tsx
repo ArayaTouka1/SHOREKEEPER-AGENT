@@ -100,6 +100,7 @@ interface AppActions {
   resetPersona: (id: string) => Promise<void>
   deletePersona: (id: string) => Promise<void>
   selectConversation: (id: string) => Promise<void>
+  refreshMessages: (conversationId?: string) => Promise<void>
   newConversation: () => Promise<void>
   deleteConversation: (id: string) => Promise<void>
   sendMessage: (text: string, attachmentIds?: string[], image?: MessageImage) => Promise<void>
@@ -111,7 +112,7 @@ interface AppActions {
   saveSettings: (patch: Partial<AppSettings>) => Promise<void>
   runTool: (name: string, params: Record<string, unknown>) => Promise<unknown>
   greetOnEntry: () => Promise<{ openingOpus: string | null; didGreet: boolean } | null>
-  setAutoSpeak: (fn: ((text: string) => void) | null) => void
+  setAutoSpeak: (fn: ((text: string, forceSpeak?: boolean) => Promise<boolean>) | null, synchronizeText?: boolean) => void
   setSyncRatio: (p: number) => void
   refreshVoicePresets: () => Promise<void>
   refreshVoiceAssets: () => Promise<void>
@@ -331,40 +332,92 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
     return { openingOpus: data.openingOpus ?? null, didGreet: data.didGreet === true }
   }, [])
 
-  const autoSpeakRef = useRef<((text: string) => void) | null>(null)
-  const setAutoSpeak = useCallback((fn: ((text: string) => void) | null) => {
+  const autoSpeakRef = useRef<((text: string, forceSpeak?: boolean) => Promise<boolean>) | null>(null)
+  const synchronizeTextRef = useRef(true)
+  const callSpeechWaitRef = useRef<{ conversationId: string; ready: boolean; sawProgress: boolean; completed: boolean; deferDisplay: boolean } | null>(null)
+  const finishCallSpeech = useCallback((conversationId: string): void => {
+    if (callSpeechWaitRef.current?.conversationId === conversationId) callSpeechWaitRef.current = null
+    void window.aimis.call.speechFinished(conversationId)
+  }, [])
+  const setAutoSpeak = useCallback((fn: ((text: string, forceSpeak?: boolean) => Promise<boolean>) | null, synchronizeText = true) => {
     autoSpeakRef.current = fn
+    synchronizeTextRef.current = synchronizeText
   }, [])
 
   const setSyncRatio = useCallback((p: number) => {
     const ratio = Math.min(1, Math.max(0, p))
+    const wait = callSpeechWaitRef.current
+    if (wait) {
+      if (ratio > 0 && ratio < 1) wait.sawProgress = true
+      if (ratio >= 1 && wait.sawProgress) {
+        wait.completed = true
+        if (wait.ready) finishCallSpeech(wait.conversationId)
+      }
+    }
     setState((s) => {
       if (!s.syncText) return s
-      if (ratio >= 1) return { ...s, syncText: '', syncRatio: 1 }
+      if (ratio >= 1) return wait?.deferDisplay ? { ...s, syncRatio: 1 } : { ...s, syncText: '', syncRatio: 1 }
       return { ...s, syncRatio: ratio }
     })
-  }, [])
+  }, [finishCallSpeech])
 
   useEffect(() => {
+    let streamFrame: number | null = null
+    const clearStreamFrame = (): void => {
+      if (streamFrame !== null) window.cancelAnimationFrame(streamFrame)
+      streamFrame = null
+    }
     const off = window.aimis.chat.onStream((chunk: ChatSendChunk) => {
       if (chunk.type === 'delta' && chunk.text) {
         streamRef.current += chunk.text
-        setState((s) => ({ ...s, streamingText: '', busy: true, awaitingText: true }))
+        if (streamFrame === null) streamFrame = window.requestAnimationFrame(() => {
+          streamFrame = null
+          const text = synchronizeTextRef.current ? '' : streamRef.current
+          setState((s) => s.busy && s.awaitingText && s.streamingText === text ? s : { ...s, streamingText: text, busy: true, awaitingText: true })
+        })
         return
       }
       if (chunk.type === 'done') {
+        clearStreamFrame()
         const spoken = chunk.text ?? streamRef.current
         streamRef.current = ''
-        setState((s) => ({ ...s, streamingText: '', busy: false, awaitingText: false, syncText: spoken && autoSpeakRef.current ? spoken : '', syncRatio: 1 }))
-        void refreshMessages()
-        void refreshConversations()
-        void refreshMemories()
-        if (spoken && autoSpeakRef.current) {
-          autoSpeakRef.current(spoken)
+        const autoSpeak = autoSpeakRef.current
+        if (chunk.conversationId && spoken && autoSpeak) {
+          callSpeechWaitRef.current = { conversationId: chunk.conversationId, ready: false, sawProgress: false, completed: false, deferDisplay: chunk.deferTextUntilSpeechFinished === true }
+        }
+        const notifyCallSpeechFinished = (): void => {
+          if (chunk.conversationId) finishCallSpeech(chunk.conversationId)
+        }
+        if (spoken && autoSpeak) {
+          setState((s) => ({ ...s, streamingText: '', busy: true, awaitingText: true, syncText: '', syncRatio: 0 }))
+          void autoSpeak(spoken, chunk.forceSpeak).then((ready) => {
+            setState((s) => ({ ...s, streamingText: '', busy: false, awaitingText: false, syncText: ready ? spoken : '', syncRatio: ready ? 0.001 : 1 }))
+            void refreshMessages()
+            void refreshConversations()
+            void refreshMemories()
+            if (!ready) notifyCallSpeechFinished()
+            else if (chunk.conversationId && callSpeechWaitRef.current?.conversationId === chunk.conversationId) {
+              callSpeechWaitRef.current.ready = true
+              if (callSpeechWaitRef.current.completed) finishCallSpeech(chunk.conversationId)
+            }
+          }).catch(() => {
+            setState((s) => ({ ...s, streamingText: '', busy: false, awaitingText: false, syncText: '', syncRatio: 1 }))
+            void refreshMessages()
+            void refreshConversations()
+            void refreshMemories()
+            notifyCallSpeechFinished()
+          })
+        } else {
+          setState((s) => ({ ...s, streamingText: '', busy: false, awaitingText: false, syncText: '', syncRatio: 1 }))
+          void refreshMessages()
+          void refreshConversations()
+          void refreshMemories()
+          notifyCallSpeechFinished()
         }
         return
       }
-      if (chunk.type === 'error') {
+      if (chunk.type === 'error' || chunk.type === 'cancelled') {
+        clearStreamFrame()
         streamRef.current = ''
         setState((s) => ({ ...s, streamingText: '', busy: false, awaitingText: false }))
         return
@@ -374,8 +427,13 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
         void refreshMemories()
       }
     })
-    return off
-  }, [refreshMessages, refreshConversations, refreshMemories])
+    return () => { clearStreamFrame(); off() }
+  }, [finishCallSpeech, refreshMessages, refreshConversations, refreshMemories])
+
+  useEffect(() => window.aimis.call.onEnded((conversationId) => {
+    void refreshMessages(conversationId).finally(() => setState((s) => ({ ...s, syncText: '', syncRatio: 1 })))
+    void refreshConversations()
+  }), [refreshMessages, refreshConversations])
 
 
   const switchCharacter = useCallback(
@@ -868,6 +926,7 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
       resetPersona,
       deletePersona,
       selectConversation,
+      refreshMessages,
       newConversation,
       deleteConversation,
       sendMessage,
@@ -925,6 +984,7 @@ export function AppProvider({ children }: { children: React.ReactNode }): React.
       resetPersona,
       deletePersona,
       selectConversation,
+      refreshMessages,
       newConversation,
       deleteConversation,
       sendMessage,

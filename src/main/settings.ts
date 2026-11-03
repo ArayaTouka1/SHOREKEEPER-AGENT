@@ -16,7 +16,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
     stream: true,
     typeSpeedMs: 18,
     memoryTopK: 4,
-    autoSpeak: false
+    autoSpeak: false,
+    appearance: {
+      userBubbleFrom: '#123e79',
+      userBubbleTo: '#123054',
+      characterBubble: '#f5fafc',
+      bubbleStyle: 'resonance',
+      showCharacterAvatar: true,
+      showUserAvatar: true,
+      userAvatar: ''
+    }
   },
   coop: {
     enabled: true,
@@ -36,7 +45,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
     skipSplash: false,
     theme: 'sakura',
     closeAction: 'ask',
-    closeAskDisabled: false
+    closeAskDisabled: false,
+    autoUpdateEnabled: true
+  },
+  network: {
+    mode: 'system',
+    proxyRules: '',
+    proxyBypassRules: '<local>'
   },
   inworld: {
     apiKey: '',
@@ -56,9 +71,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     verified: false
   },
   localTts: {
-    backend: 'qwen3',
+    backend: 'indextts',
     endpoint: 'http://127.0.0.1:36365',
     refAudioPath: '',
+    refAudioDirectory: '',
     refText: '',
     modelPath: '',
     spkId: '中文女',
@@ -70,10 +86,42 @@ export const DEFAULT_SETTINGS: AppSettings = {
     qwen3VoiceFile: '',
     qwen3RefText: '',
     qwen3Runner: '',
-    qwen3Language: 'zh',
-    qwen3Device: 'cpu',
+    qwen3Language: 'ZH',
+    qwen3Device: 'cuda',
+    gptSovitsEndpoint: 'http://127.0.0.1:9880',
+    gptSovitsTtsPath: '/tts',
+    gptSovitsProbePath: '/docs',
+    gptSovitsTextLang: 'zh',
+    gptSovitsPromptLang: 'zh',
+    openAiTtsEndpoint: 'http://127.0.0.1:8000/v1/audio/speech',
+    openAiTtsModel: 'tts-1',
+    openAiTtsVoice: 'alloy',
+    openAiTtsApiKey: '',
+    genericTtsEndpoint: 'http://127.0.0.1:5000/tts',
+    genericTtsMethod: 'POST',
+    genericTtsBody: '{"text":"{{text}}","voice":"{{voice}}"}',
+    genericTtsResponse: 'audio',
+    genericTtsBase64Field: 'audio',
+    genericTtsVoice: '',
+    genericTtsApiKey: '',
     serviceCommand: '',
     autoStart: false,
+  },
+  live2d: {
+    modelPath: '',
+    corePath: ''
+  },
+  voiceCall: {
+    inputDeviceId: '',
+    outputDeviceId: '',
+    backgroundPath: '',
+    backgroundKind: 'image',
+    backgroundByCharacter: {},
+    renderByModel: {},
+    ringtoneEnabled: true,
+    ringtoneStyle: 'classic',
+    ringtoneVolume: 65,
+    ringtonePath: ''
   },
   sticker: {
     searchEnabled: true,
@@ -144,8 +192,7 @@ export const settingsRepo = {
   get(): AppSettings {
     const merged = deepMerge(DEFAULT_SETTINGS, settingsStore.read())
     if ((merged.localTts.backend as string) === 'kokoro') {
-      merged.localTts.backend = 'qwen3'
-      merged.localTts.endpoint = DEFAULT_SETTINGS.localTts.endpoint
+      merged.localTts.backend = 'indextts'
     }
     if (!merged.cloudTts.baseUrl) merged.cloudTts.baseUrl = DEFAULT_SETTINGS.cloudTts.baseUrl
     if (!merged.cloudTts.authMode) merged.cloudTts.authMode = DEFAULT_SETTINGS.cloudTts.authMode

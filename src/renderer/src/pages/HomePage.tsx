@@ -60,22 +60,16 @@ export default function HomePage({ onNavigate }: { onNavigate: (r: Route) => voi
         </div>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '28px 40px 36px' }}>
+      <div className="home-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '28px 40px 36px' }}>
         <div style={{ maxWidth: 1000, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
           {/* 角色主卡 —— 首页的门面，默认展开 */}
-          <Collapsible
-            title="角色状态"
-            subtitle={character?.name ?? name}
-            defaultOpen
-            testId="home-hero"
-          >
+          <div className="card" data-testid="home-hero" style={{ padding: 0, overflow: 'hidden', borderRadius: 'var(--r-card)' }}>
             <div
               style={{
                 position: 'relative',
                 overflow: 'hidden',
                 borderRadius: 'var(--r-card)',
-                margin: '0 -20px -18px',
-                padding: '36px 30px 30px',
+                padding: '70px 30px 30px',
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
@@ -97,7 +91,8 @@ export default function HomePage({ onNavigate }: { onNavigate: (r: Route) => voi
                       width: '100%',
                       height: '100%',
                       objectFit: 'cover',
-                      opacity: (character.avatar.bannerOpacity ?? 55) / 100
+                      opacity: (character.avatar.bannerOpacity ?? 55) / 100,
+                      zIndex: 0
                     }}
                   />
                 ) : (
@@ -108,7 +103,8 @@ export default function HomePage({ onNavigate }: { onNavigate: (r: Route) => voi
                       backgroundImage: `url(${character.avatar.banner})`,
                       backgroundSize: 'cover',
                       backgroundPosition: 'center 22%',
-                      opacity: (character.avatar.bannerOpacity ?? 55) / 100
+                      opacity: (character.avatar.bannerOpacity ?? 55) / 100,
+                      zIndex: 0
                     }}
                   />
                 )
@@ -117,14 +113,15 @@ export default function HomePage({ onNavigate }: { onNavigate: (r: Route) => voi
                 style={{
                   position: 'absolute',
                   inset: 0,
-                  background:
-                    'linear-gradient(180deg, transparent 0%, var(--glass) 58%, var(--bg-base) 100%)'
+                  background: 'linear-gradient(180deg, rgba(8, 18, 36, 0.18) 0%, rgba(8, 18, 36, 0.08) 100%)',
+                  zIndex: 1,
+                  pointerEvents: 'none'
                 }}
               />
-              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+              <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                 <button
                   onClick={() => speak(`你好呀，我是${name}。`)}
-                  title="点我打个招呼"
+                  aria-label="点我打个招呼"
                   style={{ borderRadius: '50%', lineHeight: 0 }}
                 >
                   <Avatar src={character?.avatar.main} size={96} online ring />
@@ -136,14 +133,13 @@ export default function HomePage({ onNavigate }: { onNavigate: (r: Route) => voi
                   <span style={{ color: 'var(--ok)' }}>●</span> 在线
                 </div>
                 <div style={{ fontSize: 30, fontWeight: 500, marginTop: 10, color: 'var(--text-1)' }}>{greeting}</div><Affinity compact />
-                <div style={{ fontSize: 14, color: 'var(--text-2)' }}>{relationship?.greeting ?? character?.greeting ?? '今天想一起做点什么?'}</div>
               </div>
             </div>
-          </Collapsible>
+          </div>
 
           {/* 输入框 */}
           <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px 12px 18px' }}>
-            <button className="btn ghost" style={{ padding: 4, fontSize: 18, lineHeight: 1 }} title="附件">
+            <button className="btn ghost" style={{ padding: 4, fontSize: 18, lineHeight: 1 }} aria-label="附件">
               +
             </button>
             <input
@@ -158,7 +154,7 @@ export default function HomePage({ onNavigate }: { onNavigate: (r: Route) => voi
             <button
               className="btn ghost"
               style={{ padding: 6 }}
-              title="语音输入（需在设置中开启）"
+              aria-label="语音输入（需在设置中开启）"
               onClick={() => onNavigate('settings')}
             >
               <svg width="15" height="15" viewBox="0 0 16 16" fill="none">

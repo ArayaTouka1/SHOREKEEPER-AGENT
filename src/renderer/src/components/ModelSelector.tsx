@@ -145,7 +145,7 @@ export default function ModelSelector(): React.ReactElement {
         className="btn sm"
         data-testid="model-selector"
         onClick={() => setOpen((v) => !v)}
-        title={active ? `${active.baseUrl}\n模型 ID：${active.model}` : '选择对话模型'}
+        aria-label={active ? `${active.baseUrl}\n模型 ID：${active.model}` : '选择对话模型'}
         style={{ maxWidth: 240, gap: 6 }}
       >
         <span style={{ color: 'var(--accent)', fontSize: 11 }}>◈</span>
@@ -243,7 +243,7 @@ export default function ModelSelector(): React.ReactElement {
                   className="btn ghost sm danger"
                   data-testid={`chat-disconnect-${m.id}`}
                   disabled={busy === m.id}
-                  title="断开这个本地模型"
+                  aria-label="断开这个本地模型"
                   onClick={() => void disconnectLocal(m)}
                   style={{ fontSize: 10.5, padding: '2px 8px', flexShrink: 0 }}
                 >

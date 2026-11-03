@@ -221,7 +221,7 @@ export default function StickerPicker({
             {label}
           </button>
         ))}
-        <button className="sticker-close" onClick={onClose} title="关闭">
+        <button className="sticker-close" onClick={onClose} aria-label="关闭">
           ×
         </button>
       </div>
@@ -244,7 +244,7 @@ export default function StickerPicker({
                   key={s.id}
                   className="sticker-cell"
                   data-sticker-id={s.id}
-                  title={s.mood}
+                  aria-label={s.mood}
                   onClick={() =>
                     onPick({
                       path: s.path,
@@ -338,7 +338,7 @@ export default function StickerPicker({
                 <button
                   key={w.url}
                   className="sticker-cell"
-                  title={w.title ?? w.url}
+                  aria-label={w.title ?? w.url}
                   onClick={() => void downloadOne(w)}
                 >
                   <img src={w.thumbnail ?? w.url} alt="" loading="lazy" referrerPolicy="no-referrer" />

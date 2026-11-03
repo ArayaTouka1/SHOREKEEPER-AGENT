@@ -7,7 +7,7 @@ import { EmptyHint, Field, SectionHeader, SliderField, SwitchRow } from '../../c
    背景媒体 —— 图片 / 视频作为界面背景
    ================================================================== */
 
-export default function BackgroundSection(): React.ReactElement {
+export default function BackgroundSection({ includeSplash = true, title = '背景媒体', description = '用图片或视频作为界面背景，属于主题的一部分。上面会自动叠一层遮罩保证文字可读，遮罩浓度可以调。' }: { includeSplash?: boolean; title?: string; description?: string } = {}): React.ReactElement {
   const { theme, backgrounds, refreshBackgrounds, patchBackground, resetBackground } = useApp()
   const [flash, setFlash] = useState('')
   const [busy, setBusy] = useState(false)
@@ -71,10 +71,10 @@ export default function BackgroundSection(): React.ReactElement {
 
   return (
     <>
-      <SplashSection />
+      {includeSplash && <SplashSection />}
       <SectionHeader
-        title="背景媒体"
-        desc="用图片或视频作为界面背景，属于主题的一部分。上面会自动叠一层遮罩保证文字可读，遮罩浓度可以调。"
+        title={title}
+        desc={description}
       />
 
       {/* 开关与参数 */}
@@ -261,7 +261,7 @@ export default function BackgroundSection(): React.ReactElement {
                   <button
                     className="btn ghost sm danger"
                     style={{ position: 'absolute', top: 2, right: 2 }}
-                    title="删除"
+                    aria-label="删除"
                     onClick={async () => {
                       await window.aimis.background.remove(m.id)
                       await refreshBackgrounds()

@@ -6,6 +6,17 @@ node_modules/
 .npm-cache/
 package-lock.json.bak
 
+# Local build caches and scratch directories (electron-builder, portable runtime).
+.build-cache/
+.build-temp/
+.cache-builder/
+.cache-electron/
+.electron-builder-cache/
+.electron-cache/
+.localappdata/
+.tmp-*/
+
+
 out/
 dist/
 *.tsbuildinfo
@@ -35,6 +46,8 @@ userData/
 uploads/
 conversations/
 chat.json
+chat-index.json
+chat-messages/
 memory.json
 relationships.json
 settings.json
@@ -85,7 +98,15 @@ desktop.ini
 !resources/personas/**
 !resources/plugins/**
 
+# Local development plugins are intentionally excluded from releases and source uploads.
+local-plugins/
+
 resources/sherpa-onnx/
 resources/kokoro/
+
+# Local STT assets are fetched by scripts/download-stt-model.cjs and built by
+# scripts/build-indextts-runtime.ps1; model weights stay out of the repo.
+resources/stt-model/
+resources/stt-runtime/
 
 screenshots/

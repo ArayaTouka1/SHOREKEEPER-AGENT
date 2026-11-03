@@ -14,11 +14,11 @@ export interface CharacterAvatar {
 
 /**
  */
-export type VoiceEngine = 'voice-pack' | 'inworld' | 'system' | 'none'
+export type VoiceEngine = 'voice-pack' | 'inworld' | 'indextts' | 'gpt-sovits' | 'openai-local' | 'http-local' | 'system' | 'none'
 
 /**
  */
-export type LocalBackend = 'kokoro' | 'gpt-sovits' | 'cosyvoice' | 'qwen3'
+export type LocalBackend = 'kokoro' | 'gpt-sovits' | 'cosyvoice' | 'qwen3' | 'indextts'
 
 
 export type Qwen3Variant = '1.7b' | '0.6b'
@@ -37,6 +37,7 @@ export interface LocalTtsConfig {
   backend: LocalBackend
   endpoint: string
   refAudioPath: string
+  refAudioDirectory: string
   refText: string
   modelPath: string
   spkId: string
@@ -52,6 +53,23 @@ export interface LocalTtsConfig {
   qwen3Runner: string
   qwen3Language: string
   qwen3Device: Qwen3Device
+
+  gptSovitsEndpoint: string
+  gptSovitsTtsPath: string
+  gptSovitsProbePath: string
+  gptSovitsTextLang: string
+  gptSovitsPromptLang: string
+  openAiTtsEndpoint: string
+  openAiTtsModel: string
+  openAiTtsVoice: string
+  openAiTtsApiKey: string
+  genericTtsEndpoint: string
+  genericTtsMethod: 'GET' | 'POST'
+  genericTtsBody: string
+  genericTtsResponse: 'audio' | 'base64'
+  genericTtsBase64Field: string
+  genericTtsVoice: string
+  genericTtsApiKey: string
 
 
   serviceCommand: string
@@ -74,6 +92,11 @@ export interface CharacterVoice {
   endpoint: string
   localBackend: LocalBackend
   inworldModel: string
+  /** Per-character reference voice overrides for local cloning engines. */
+  localRefAudioPath?: string
+  localRefText?: string
+  openAiTtsVoiceId?: string
+  genericTtsVoiceId?: string
 }
 
 export interface VoicePreset {
@@ -105,6 +128,8 @@ export interface Character {
   avatar: CharacterAvatar
   personaId: string
   voice: CharacterVoice
+  /** Optional 3D/Live2D model used in this character's voice call window. */
+  callModelPath?: string
   greeting: string
   /**
    */
@@ -494,6 +519,17 @@ export interface ChatConfig {
   typeSpeedMs: number
   memoryTopK: number
   autoSpeak: boolean
+  appearance: ChatAppearanceConfig
+}
+
+export interface ChatAppearanceConfig {
+  userBubbleFrom: string
+  userBubbleTo: string
+  characterBubble: string
+  bubbleStyle: 'resonance' | 'soft' | 'minimal'
+  showCharacterAvatar: boolean
+  showUserAvatar: boolean
+  userAvatar: string
 }
 
 export interface CoopConfig {
@@ -517,6 +553,51 @@ export interface GeneralConfig {
   theme: string
   closeAction: 'ask' | 'minimize' | 'quit'
   closeAskDisabled: boolean
+  autoUpdateEnabled: boolean
+}
+
+export interface Live2DConfig {
+  modelPath: string
+  corePath: string
+}
+
+export interface VoiceCallConfig {
+  inputDeviceId: string
+  outputDeviceId: string
+  backgroundPath: string
+  backgroundKind: 'image' | 'video'
+  backgroundByCharacter: Record<string, { path: string; kind: 'image' | 'video' }>
+  renderByModel: Record<string, CallRenderConfig>
+  ringtoneEnabled: boolean
+  ringtoneStyle: 'classic' | 'soft'
+  ringtoneVolume: number
+  ringtonePath: string
+}
+
+export interface CallRenderConfig {
+  exposure: number
+  light: number
+  ambientLight: number
+  keyLight: number
+  fillLight: number
+  rimLight: number
+  faceLight: number
+  shadowStrength: number
+  warmth: number
+  hue: number
+  blur: number
+  brightness: number
+  saturation: number
+  contrast: number
+  zoom: number
+  verticalOffset: number
+}
+
+export interface NetworkConfig {
+  mode: 'system' | 'direct' | 'fixed'
+  /** Electron proxy rules, e.g. http://127.0.0.1:7890 or socks5://127.0.0.1:1080. */
+  proxyRules: string
+  proxyBypassRules: string
 }
 
 export interface AppSettings {
@@ -525,9 +606,12 @@ export interface AppSettings {
   coop: CoopConfig
   voice: VoiceConfig
   general: GeneralConfig
+  network: NetworkConfig
   inworld: InworldConfig
   cloudTts: CloudTtsConfig
   localTts: LocalTtsConfig
+  live2d: Live2DConfig
+  voiceCall: VoiceCallConfig
   sticker: StickerConfig
   agent: AgentConfig
 }
@@ -621,7 +705,10 @@ export interface ChatSendRequest {
 }
 
 export interface ChatSendChunk {
-  type: 'delta' | 'done' | 'tool' | 'error'
+  type: 'delta' | 'done' | 'tool' | 'error' | 'cancelled'
+  conversationId?: string
+  deferTextUntilSpeechFinished?: boolean
+  forceSpeak?: boolean
   text?: string
   toolCall?: ToolCallRecord
   messageId?: string
@@ -655,6 +742,8 @@ export interface ModelInfo {
 
 export interface ModelState {
   overrides?: Record<string, Partial<Pick<ModelInfo, 'baseUrl' | 'model' | 'apiKey'>>>
+  /** API keys shared by built-in models from the same provider. */
+  providerKeys?: Record<string, string>
   activeId: string
   custom: ModelInfo[]
   localConnections: Record<string, number>
@@ -759,6 +848,43 @@ export interface PluginCommandSpec {
   name: string
   label: string
   description: string
+  params?: Array<{
+    key: string
+    label: string
+    required?: boolean
+    placeholder?: string
+    defaultValue?: string
+  }>
+}
+
+export interface PluginPermissions {
+  /** HTTPS hosts the sandbox may contact. Exact hosts and leading-wildcard domains are supported. */
+  network: string[]
+  /** Allow opening a URL in the user's default browser. */
+  externalLinks: boolean
+  /** Allow CSS supplied by the plugin to affect the whole renderer. */
+  globalStyles: boolean
+  /** Allow sandboxed floating widgets to be mounted above the application UI. */
+  widgets: boolean
+}
+
+export interface PluginWidgetSpec {
+  id: string
+  title: string
+  entry: string
+  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
+  width: number
+  height: number
+}
+
+export interface PluginUiContributions {
+  globalStyle: string | null
+  widgets: PluginWidgetSpec[]
+}
+
+export interface PluginUiRuntime {
+  cssText: string | null
+  widgets: Array<PluginWidgetSpec & { html: string }>
 }
 
 /**
@@ -781,6 +907,8 @@ export interface PluginManifest {
   icon: string | null
   enabled: boolean
   commands: PluginCommandSpec[]
+  permissions: PluginPermissions
+  contributes: PluginUiContributions
 }
 
 export interface PluginInfo {
@@ -796,6 +924,7 @@ export interface PluginInfo {
   /**
    */
   iconUrl: string | null
+  ui: PluginUiRuntime
 }
 
 export interface BrokenPlugin {

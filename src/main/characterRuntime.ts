@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomInt } from 'node:crypto'
 import type { Character } from '../shared/types'
 import { RELATIONSHIP_STAGES, type CharacterRelationship } from '../shared/relationship'
 import { JsonStore } from './store'
@@ -13,9 +13,10 @@ interface RelationshipRecord {
   recent: string[]
   events: string[]
   openingSlot: string
+  openingHistory: Record<string, string[]>
 }
 export const relationshipStore = new JsonStore<Record<string, RelationshipRecord>>('relationships', () => ({}))
-const initial = (): RelationshipRecord => ({ score: 0, lastInteractionAt: 0, lastAwardAt: 0, day: '', earnedToday: 0, recent: [], events: [], openingSlot: '' })
+const initial = (): RelationshipRecord => ({ score: 0, lastInteractionAt: 0, lastAwardAt: 0, day: '', earnedToday: 0, recent: [], events: [], openingSlot: '', openingHistory: {} })
 const PERIODS = [
   { key: 'Midnight', label: '深夜' }, { key: 'Dawn', label: '清晨' }, { key: 'Morning', label: '上午' },
   { key: 'Noon', label: '午间' }, { key: 'Afternoon', label: '下午' }, { key: 'Evening', label: '傍晚' }
@@ -42,7 +43,15 @@ function sectionLines(text: string, key: string): string[] {
 }
 function recordFor(id: string): RelationshipRecord {
   const value = relationshipStore.read()[id]
-  return { ...initial(), ...value, score: Number.isFinite(value?.score) ? Math.max(0, Math.min(100, value.score)) : 0 }
+  return { ...initial(), ...value, openingHistory: value?.openingHistory && typeof value.openingHistory === 'object' ? value.openingHistory : {}, score: Number.isFinite(value?.score) ? Math.max(0, Math.min(100, value.score)) : 0 }
+}
+function randomSample<T>(items: T[], count: number): T[] {
+  const pool = [...items]
+  for (let index = pool.length - 1; index > 0; index--) {
+    const target = randomInt(index + 1)
+    ;[pool[index], pool[target]] = [pool[target], pool[index]]
+  }
+  return pool.slice(0, Math.min(count, pool.length))
 }
 export function recordInteraction(id: string, eventId: string, text: string, date = new Date()): boolean {
   const state = relationshipStore.read()
@@ -72,7 +81,7 @@ export function recordInteraction(id: string, eventId: string, text: string, dat
 export function resetRelationship(id: string): void {
   relationshipStore.update(state => { state[id] = initial() })
 }
-export function relationshipSnapshot(character: Character, date = new Date()): CharacterRelationship {
+export function relationshipSnapshot(character: Character, date = new Date(), rememberOpening = false): CharacterRelationship {
   const record = recordFor(character.id)
   const index = stageIndex(record.score)
   const stage = RELATIONSHIP_STAGES[index]
@@ -81,11 +90,20 @@ export function relationshipSnapshot(character: Character, date = new Date()): C
   const pack = meta ? loadPersonaPack(meta.pack, meta.name) : null
   const openingText = pack?.files.find(f => f.name.startsWith('13_OPUS'))?.content ?? ''
   const relationshipText = pack?.files.find(f => f.name.startsWith('14_AFFINITY'))?.content ?? ''
-  const openings = sectionLines(openingText, period.key).slice(0, index < 2 ? 2 : undefined)
-  const seed = parseInt(createHash('sha256').update(character.id + localDay(date) + period.key).digest('hex').slice(0, 8), 16)
+  const openings = sectionLines(openingText, period.key)
+  const history = record.openingHistory[period.key] ?? []
+  const recent = new Set(history.slice(-Math.min(3, Math.max(0, openings.length - 1))))
+  const eligible = openings.filter(line => !recent.has(line))
+  const greetingRaw = (eligible.length ? eligible : openings)[randomInt(Math.max(1, eligible.length || openings.length))] || character.greeting
+  if (rememberOpening && openings.length) {
+    const state = relationshipStore.read()
+    const current = recordFor(character.id)
+    current.openingHistory = { ...current.openingHistory, [period.key]: [...(current.openingHistory[period.key] ?? []), greetingRaw].slice(-8) }
+    state[character.id] = current
+    relationshipStore.write(state)
+  }
   // Opening quotes cannot establish an identity or relationship the user never chose.
   const address = character.userAddressOverride?.trim() || '你'
-  const greetingRaw = openings[seed % openings.length] || character.greeting
   const greeting = greetingRaw.replace(/漂泊者|开拓者/g, address)
   const core = pack?.files.find(f => f.name.includes('CORE_IDENTITY'))?.content ?? ''
   const coreLines = core.split(/\r?\n/)
@@ -101,17 +119,17 @@ export function relationshipSnapshot(character: Character, date = new Date()): C
   }
 }
 export function relationshipPrompt(character: Character, date = new Date(), opening = false): string {
-  const snapshot = relationshipSnapshot(character, date)
+  const snapshot = relationshipSnapshot(character, date, opening)
   const meta = PERSONA_PACKS.find(p => p.characterId === character.id)
   const pack = meta ? loadPersonaPack(meta.pack, meta.name) : null
   const text = pack?.files.find(f => f.name.startsWith('14_AFFINITY'))?.content ?? ''
-  const samples = sectionLines(text, snapshot.stage).slice(0, 4)
+  const samples = randomSample(sectionLines(text, snapshot.stage), 4)
   return [
     '## 本轮角色状态',
     '本机当地时间：' + date.toLocaleString('zh-CN') + '；时段：' + snapshot.period,
     '当前关系阶段：' + snapshot.stage + '；回应分寸：' + snapshot.summary,
     '只采用这个阶段的坦率程度，不得跨级称呼、表白或把用户等同原作人物。亲密不预设恋爱，也不意味着排他依赖。',
-    '这些例句仅用于语气参考，不是真实共同经历；不得凭例句声称记得用户习惯、见过用户、知道用户身体状态或已完成任务。',
+    '这些例句仅用于语气参考，不是真实共同经历；不得凭例句声称记得用户习惯、见过用户、知道用户身体状态或已完成任务。每轮从完整例句中随机取样，不能固定照搬同一句。',
     ...samples.map(line => '- ' + line),
     opening ? '本时段首次交流：若用户只是问候，可自然使用这个时段的语气：' + snapshot.greeting : '持续对话中不要重复开场问候；时段变化只能自然影响语气。',
     '工作请求优先准确完成任务，角色语气不限制必要解释、表格或文档内容。低好感仍提供完整帮助。不要在回复里播报好感数字、阶段名或这些规则。'

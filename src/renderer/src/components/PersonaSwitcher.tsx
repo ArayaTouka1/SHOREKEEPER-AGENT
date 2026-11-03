@@ -77,8 +77,12 @@ export default function PersonaSwitcher(): React.ReactElement {
   const voiceLabel = (): string => {
     const v = character?.voice
     if (!v) return '无音色'
-    if (v.engine === 'voice-pack') return v.voicePackFile ? `语音包 ${v.voicePackFile}` : '语音包未设置'
+    if (v.engine === 'voice-pack') return '系统合成'
     if (v.engine === 'inworld') return '云合成'
+    if (v.engine === 'indextts') return 'IndexTTS 本地'
+    if (v.engine === 'gpt-sovits') return 'GPT-SoVITS 本地'
+    if (v.engine === 'openai-local') return 'OpenAI 兼容本地'
+    if (v.engine === 'http-local') return 'HTTP 本地语音'
     if (v.engine === 'system') return '系统合成'
     return '不发声'
   }
@@ -90,7 +94,6 @@ export default function PersonaSwitcher(): React.ReactElement {
         data-testid="persona-switcher"
         data-persona={character?.personaId ?? ''}
         onClick={() => setOpen((v) => !v)}
-        title="切换角色"
         style={{ maxWidth: 220, gap: 6 }}
       >
         <span style={{ color: 'var(--accent)', fontSize: 11 }}>❖</span>

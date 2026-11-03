@@ -5,10 +5,11 @@
  */
 
 const { execFileSync } = require('node:child_process')
-const { existsSync, mkdirSync, readdirSync, renameSync, statSync, rmSync } = require('node:fs')
+const { existsSync, mkdirSync, readdirSync, renameSync, statSync, rmSync, writeFileSync } = require('node:fs')
 const { join, resolve } = require('node:path')
 
 const ROOT = resolve(__dirname, '..')
+const PACKAGE_VERSION = require(join(ROOT, 'package.json')).version
 const RELEASE = join(ROOT, 'release')
 const INSTALLER_DIR = join(RELEASE, 'installer')
 const PORTABLE_DIR = join(RELEASE, 'portable')
@@ -128,8 +129,25 @@ function moveBy(files, dest, predicate) {
 
 const entries = existsSync(RELEASE) ? readdirSync(RELEASE) : []
 
-const installerMoved = moveBy(entries, INSTALLER_DIR, (f) => /-setup\.exe(\.blockmap)?$/i.test(f))
-const portableMoved = moveBy(entries, PORTABLE_DIR, (f) => /-portable\.exe$/i.test(f))
+const installerMoved = moveBy(entries, INSTALLER_DIR, (f) => /-setup\.exe(\.blockmap)?$/i.test(f) || /^latest\.yml$/i.test(f))
+const portableMoved = moveBy(entries, PORTABLE_DIR, (f) => /\.zip$/i.test(f))
+
+const setupFile = readdirSync(INSTALLER_DIR).find((f) => f === `Shorekeeper-Agent-${PACKAGE_VERSION}-x64-setup.exe`)
+if (setupFile) {
+  const launcher = [
+    '@echo off',
+    'setlocal',
+    'set "SAFE_TEMP=%LOCALAPPDATA%\\ShorekeeperAgent\\InstallerTemp"',
+    'if not exist "%SAFE_TEMP%" mkdir "%SAFE_TEMP%"',
+    'set "TEMP=%SAFE_TEMP%"',
+    'set "TMP=%SAFE_TEMP%"',
+    `"%~dp0${setupFile}"`,
+    'set "RESULT=%ERRORLEVEL%"',
+    'endlocal & exit /b %RESULT%',
+    ''
+  ].join('\r\n')
+  writeFileSync(join(INSTALLER_DIR, 'Launch-Installer-Safely.cmd'), launcher, 'ascii')
+}
 
 /* ------------------------------------------------------------------ *
  * ------------------------------------------------------------------ */

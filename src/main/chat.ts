@@ -1,4 +1,7 @@
-import { JsonStore, uid } from './store'
+import { JsonStore, uid, ensureDataDir } from './store'
+import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
+import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import type { Conversation, ChatMessage, MessageRole } from '../shared/types'
 
 interface ChatState {
@@ -6,11 +9,55 @@ interface ChatState {
   messages: ChatMessage[]
 }
 
-export const chatStore = new JsonStore<ChatState>('chat', () => ({ conversations: [], messages: [] }))
+let indexStore: JsonStore<Conversation[]> | undefined
+const messageStores = new Map<string, JsonStore<ChatMessage[]>>()
+const messageOwners = new Map<string, string>()
+
+function messagesDir(): string {
+  const dir = join(ensureDataDir(), 'chat-messages')
+  mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+function messageStore(id: string): JsonStore<ChatMessage[]> {
+  const cached = messageStores.get(id)
+  if (cached) return cached
+  const name = createHash('sha256').update(id).digest('hex')
+  const store = new JsonStore<ChatMessage[]>(name, () => [], messagesDir())
+  if (messageStores.size >= 8) {
+    const oldest = messageStores.keys().next().value!
+    messageStores.delete(oldest)
+    for (const [message, owner] of messageOwners) if (owner === oldest) messageOwners.delete(message)
+  }
+  messageStores.set(id, store)
+  return store
+}
+
+function conversationsStore(): JsonStore<Conversation[]> {
+  if (indexStore) return indexStore
+  const next = new JsonStore<Conversation[]>('chat-index', () => [])
+  if (!existsSync(next.path)) {
+    // Commit the index last. A failed migration can restart from the untouched legacy file.
+    const legacyFile = join(ensureDataDir(), 'chat.json')
+    const legacy = existsSync(legacyFile)
+      ? new JsonStore<ChatState>('chat', () => ({ conversations: [], messages: [] })).read()
+      : { conversations: [], messages: [] }
+    const grouped = new Map<string, ChatMessage[]>()
+    for (const message of legacy.messages) {
+      const list = grouped.get(message.conversationId) ?? []
+      list.push(message)
+      grouped.set(message.conversationId, list)
+    }
+    for (const conversation of legacy.conversations) messageStore(conversation.id).write(grouped.get(conversation.id) ?? [])
+    next.write(legacy.conversations)
+  }
+  indexStore = next
+  return next
+}
 
 export const chatRepo = {
   conversations(characterId?: string): Conversation[] {
-    const list = chatStore.read().conversations
+    const list = conversationsStore().read()
     const filtered = characterId ? list.filter((c) => c.characterId === characterId) : list
     return [...filtered].sort((a, b) => b.updatedAt - a.updatedAt)
   },
@@ -26,9 +73,9 @@ export const chatRepo = {
       updatedAt: now,
       messageCount: 0
     }
-    chatStore.update((s) => {
-      s.conversations.push(conv)
-    })
+    conversationsStore()
+    messageStore(conv.id).write([])
+    conversationsStore().update((items) => { items.push(conv) })
     return conv
   },
 
@@ -39,18 +86,19 @@ export const chatRepo = {
   },
 
   delete(id: string): Conversation[] {
-    chatStore.update((s) => {
-      s.conversations = s.conversations.filter((c) => c.id !== id)
-      s.messages = s.messages.filter((m) => m.conversationId !== id)
-    })
+    conversationsStore().update((items) => items.filter((c) => c.id !== id))
+    const file = messageStore(id).path
+    if (existsSync(file)) unlinkSync(file)
+    messageStores.delete(id)
+    for (const [message, owner] of messageOwners) if (owner === id) messageOwners.delete(message)
     return this.conversations()
   },
 
   messages(conversationId: string): ChatMessage[] {
-    return chatStore
-      .read()
-      .messages.filter((m) => m.conversationId === conversationId)
-      .sort((a, b) => a.createdAt - b.createdAt)
+    if (!conversationsStore().read().some(c => c.id === conversationId)) return []
+    const messages = messageStore(conversationId).read()
+    for (const message of messages) messageOwners.set(message.id, conversationId)
+    return [...messages].sort((a, b) => a.createdAt - b.createdAt)
   },
 
   append(input: {
@@ -74,9 +122,14 @@ export const chatRepo = {
       attachments: input.attachments,
       proactive: input.proactive
     }
-    chatStore.update((s) => {
-      s.messages.push(msg)
-      const conv = s.conversations.find((c) => c.id === input.conversationId)
+    if (!conversationsStore().read().some(c => c.id === input.conversationId)) throw new Error('会话已结束或不存在')
+    messageStore(input.conversationId).update((items) => {
+      if (items.length >= 800) items.slice(0, items.length - 799).forEach(item => messageOwners.delete(item.id))
+      return [...items, msg].slice(-800)
+    })
+    messageOwners.set(msg.id, input.conversationId)
+    conversationsStore().update((items) => {
+      const conv = items.find((c) => c.id === input.conversationId)
       if (conv) {
         conv.messageCount += 1
         conv.updatedAt = now
@@ -86,16 +139,6 @@ export const chatRepo = {
         if (input.role === 'character' || input.role === 'user') {
           conv.summary = input.text.slice(0, 46) || '[表情包]'
         }
-      }
-      const inConv = s.messages.filter((m) => m.conversationId === input.conversationId)
-      if (inConv.length > 800) {
-        const drop = new Set(
-          inConv
-            .sort((a, b) => a.createdAt - b.createdAt)
-            .slice(0, inConv.length - 800)
-            .map((m) => m.id)
-        )
-        s.messages = s.messages.filter((m) => !drop.has(m.id))
       }
     })
     return msg
@@ -115,11 +158,13 @@ export const chatRepo = {
 
   updateMessage(id: string, patch: Partial<ChatMessage>): ChatMessage | null {
     let out: ChatMessage | null = null
-    chatStore.update((s) => {
-      const idx = s.messages.findIndex((m) => m.id === id)
+    const owner = messageOwners.get(id) ?? this.conversations().find(c => this.messages(c.id).some(m => m.id === id))?.id
+    if (!owner) return null
+    messageStore(owner).update((items) => {
+      const idx = items.findIndex((m) => m.id === id)
       if (idx >= 0) {
-        s.messages[idx] = { ...s.messages[idx], ...patch }
-        out = s.messages[idx]
+        items[idx] = { ...items[idx], ...patch, id, conversationId: owner }
+        out = items[idx]
       }
     })
     return out

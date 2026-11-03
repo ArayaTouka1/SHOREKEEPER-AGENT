@@ -1,16 +1,16 @@
 {
   "name": "shorekeeper-agent",
-  "version": "0.21.0",
+  "version": "0.23.0",
   "description": "守岸人陪伴终端 —— AI 角色陪伴 + 本机操作 Agent 桌面客户端",
   "main": "./out/main/index.js",
   "author": "shorekeeper",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "build": "npm run typecheck && electron-vite build",
     "preview": "electron-vite preview",
-    "pack": "electron-vite build && node scripts/dist.cjs --dir",
-    "dist": "electron-vite build && node scripts/dist.cjs",
+    "pack": "npm run build && node scripts/dist.cjs --dir",
+    "dist": "npm run build && node scripts/dist.cjs",
     "verify:chat-flow": "node scripts/verify-chat-flow.cjs",
     "verify:package": "node scripts/audit-package.cjs && node scripts/verify-clean-package.cjs",
     "verify:relationships": "node scripts/verify-relationships.cjs",
@@ -18,6 +18,8 @@
     "verify:fs": "node scripts/verify-fs-tools.cjs",
     "verify:workspace": "node scripts/verify-workspace.cjs",
     "verify:workspace-ui": "node scripts/verify-workspace-ui.cjs",
+    "verify:optimization": "node scripts/verify-optimization.cjs",
+    "verify:optimization-ui": "node scripts/verify-optimization-ui.cjs",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
   },
   "devDependencies": {
@@ -26,6 +28,7 @@
     "@types/papaparse": "^5.5.2",
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
+    "@types/three": "^0.170.0",
     "@vitejs/plugin-react": "^4.7.0",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
@@ -36,7 +39,10 @@
     "vite": "^5.4.21"
   },
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "@laplace.live/pixijs-live2d": "^0.6.1",
     "docx-preview": "^0.4.1",
+    "electron-updater": "^6.8.9",
     "exceljs": "^4.4.0",
     "fast-xml-parser": "^5.11.1",
     "jszip": "^3.10.2",
@@ -44,10 +50,12 @@
     "minimatch": "^10.2.6",
     "papaparse": "^5.7.0",
     "pdfjs-dist": "^4.10.38",
+    "pixi.js": "^8.21.0",
     "pptx-preview": "^1.0.7",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "remark-gfm": "^4.0.1",
+    "three": "^0.170.0"
   }
 }

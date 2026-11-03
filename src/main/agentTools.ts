@@ -17,7 +17,7 @@
  *
  */
 
-import { app } from 'electron'
+import { app, BrowserWindow, net } from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, copyFileSync, createReadStream, realpathSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { join, dirname, basename, extname, resolve, relative, isAbsolute } from 'node:path'
@@ -26,7 +26,7 @@ import { promisify } from 'node:util'
 import type { AgentToolSpec, JobInfo, JobStatus, PermissionDecision, TodoItem } from '../shared/types'
 import { checkPermission, getMachinePermission, isPathInside, PERMISSION_LABELS } from './permission'
 import { settingsRepo } from './settings'
-import { authorizeOperation, clearApprovals, securityState } from './workspaceSecurity'
+import { clearApprovals, securityState } from './workspaceSecurity'
 import { documentText, documentVersion, decodeText } from './documents'
 import { createDocx, replaceDocx, writeSheet } from './officeWork'
 import { minimatch } from 'minimatch'
@@ -659,20 +659,99 @@ const WEB_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
 async function fetchWithTimeout(url: string, timeoutMs = 15000): Promise<Response> {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    throw new Error(`网址格式不正确：${url}`)
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`只支持读取 HTTP/HTTPS 网页：${parsed.protocol}`)
+  }
+
   const ctl = new AbortController()
   const timer = setTimeout(() => ctl.abort(), timeoutMs)
+  const init: RequestInit = {
+    headers: {
+      'User-Agent': WEB_UA,
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Cache-Control': 'no-cache'
+    },
+    redirect: 'follow',
+    signal: ctl.signal
+  }
   try {
-    return await fetch(url, {
-      headers: {
-        'User-Agent': WEB_UA,
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8'
-      },
-      redirect: 'follow',
-      signal: ctl.signal
-    })
+    // Electron's Chromium network stack follows the application's proxy,
+    // certificate and DNS configuration. Node's native fetch bypasses part of
+    // that setup on Windows and was the reason most non-Baidu sites returned
+    // the opaque "fetch failed" error.
+    try {
+      return await net.fetch(parsed.toString(), init)
+    } catch (electronError) {
+      // Keep a native-fetch fallback for tests and unusual Electron sessions.
+      try {
+        return await fetch(parsed.toString(), init)
+      } catch (nodeError) {
+        const a = electronError instanceof Error ? electronError.message : String(electronError)
+        const b = nodeError instanceof Error ? nodeError.message : String(nodeError)
+        throw new Error(`网页连接失败：${a}${b && b !== a ? `；备用网络栈：${b}` : ''}`)
+      }
+    }
   } finally {
     clearTimeout(timer)
+  }
+}
+
+function responseCharset(res: Response, bytes: Uint8Array): string {
+  const header = res.headers.get('content-type') ?? ''
+  const fromHeader = header.match(/charset\s*=\s*["']?([^;\s"']+)/i)?.[1]
+  if (fromHeader) return fromHeader
+  const head = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.length, 4096)))
+  return head.match(/<meta[^>]+charset\s*=\s*["']?([^\s"'/>;]+)/i)?.[1]
+    ?? head.match(/<meta[^>]+content=["'][^"']*charset=([^\s"';>]+)/i)?.[1]
+    ?? 'utf-8'
+}
+
+async function readResponseText(res: Response, maxBytes = 8 * 1024 * 1024): Promise<string> {
+  const contentLength = Number(res.headers.get('content-length') ?? 0)
+  if (contentLength > maxBytes) throw new Error(`网页内容过大（${Math.ceil(contentLength / 1024 / 1024)} MB）`)
+  const bytes = new Uint8Array(await res.arrayBuffer())
+  if (bytes.byteLength > maxBytes) throw new Error(`网页内容超过 ${Math.ceil(maxBytes / 1024 / 1024)} MB 限制`)
+  const charset = responseCharset(res, bytes)
+  try {
+    return new TextDecoder(charset).decode(bytes)
+  } catch {
+    return new TextDecoder('utf-8').decode(bytes)
+  }
+}
+
+async function readRenderedPage(url: string, timeoutMs = 30000): Promise<{ title: string; text: string }> {
+  const win = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      javascript: true,
+      images: false
+    }
+  })
+  const timer = setTimeout(() => win.webContents.stop(), timeoutMs)
+  try {
+    await win.loadURL(url, { userAgent: WEB_UA })
+    // Give client-rendered pages a short chance to populate their main text.
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    return await win.webContents.executeJavaScript(`(() => {
+      const copy = document.body ? document.body.cloneNode(true) : null
+      if (copy) copy.querySelectorAll('script,style,noscript,nav,header,footer,aside,svg').forEach(n => n.remove())
+      return { title: document.title || '', text: (copy?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 12000) }
+    })()`, true) as { title: string; text: string }
+  } catch (err) {
+    throw new Error(`浏览器模式读取失败：${err instanceof Error ? err.message : String(err)}`)
+  } finally {
+    clearTimeout(timer)
+    if (!win.isDestroyed()) win.destroy()
   }
 }
 
@@ -729,7 +808,7 @@ async function webSearch(query: string): Promise<AgentToolResult> {
         errors.push(`${src.name}: HTTP ${res.status}`)
         continue
       }
-      const html = await res.text()
+      const html = await readResponseText(res)
       const results = src.parse(html)
       if (results.length === 0) {
         errors.push(`${src.name}: 未解析到结果`)
@@ -756,18 +835,50 @@ async function webSearch(query: string): Promise<AgentToolResult> {
 }
 
 async function webFetch(url: string): Promise<AgentToolResult> {
-  const res = await fetchWithTimeout(url, 20000)
-  if (!res.ok) throw new Error(`抓取失败 HTTP ${res.status}`)
-  const html = await res.text()
-  const title = stripTags((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) ?? [])[1] ?? '')
-  const body = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-  const text = stripTags(body).replace(/\s+/g, ' ').trim().slice(0, 12000)
+  let title = ''
+  let text = ''
+  let mode: 'network' | 'browser' = 'network'
+  let networkError = ''
+
+  try {
+    const res = await fetchWithTimeout(url, 20000)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const contentType = (res.headers.get('content-type') ?? '').toLowerCase()
+    const html = await readResponseText(res)
+    title = stripTags((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) ?? [])[1] ?? '')
+    const body = contentType.includes('html') || /<html[\s>]/i.test(html) ? html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<noscript[\s\S]*?<\/noscript>/gi, ' ')
+      .replace(/<(nav|header|footer|aside)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+      : html
+    text = stripTags(body).replace(/\s+/g, ' ').trim().slice(0, 12000)
+  } catch (err) {
+    networkError = err instanceof Error ? err.message : String(err)
+  }
+
+  // Some sites reject programmatic HTTP clients or render all useful content
+  // with JavaScript. Fall back to a sandboxed hidden Chromium page in those
+  // cases; it uses the exact same proxy/certificate setup as the visible app.
+  if (!text || networkError) {
+    try {
+      const rendered = await readRenderedPage(url)
+      title = rendered.title || title
+      text = rendered.text
+      mode = 'browser'
+    } catch (browserError) {
+      const detail = browserError instanceof Error ? browserError.message : String(browserError)
+      if (/ERR_CERT_DATE_INVALID|certificate.*(date|expired)|证书.*(日期|过期)/i.test(`${networkError} ${detail}`)) {
+        throw new Error(`网页证书日期无效，无法安全读取 ${url}。请检查 Windows 日期、时间和时区，或检查代理的证书；网络请求：${networkError || '未返回正文'}；${detail}`)
+      }
+      throw new Error(`网页读取失败：${networkError ? `网络请求：${networkError}；` : ''}${detail}`)
+    }
+  }
+  if (!text) throw new Error(`网页没有可读取的正文${networkError ? `；网络请求：${networkError}` : ''}`)
 
   return {
-    result: { url, title, length: text.length, text },
-    summary: `已抓取 ${url}${title ? `（${title}）` : ''}，${text.length} 字`,
+    result: { url, title, length: text.length, text, mode },
+    summary: `已抓取 ${url}${title ? `（${title}）` : ''}，${text.length} 字${mode === 'browser' ? '（浏览器模式）' : ''}`,
     context: `网页 ${url}\n标题：${title}\n正文：\n${text.slice(0, 8000)}`
   }
 }
@@ -899,11 +1010,10 @@ export async function runAgentTool(
 
   const workspace = getWorkspace()
   const decision = gate(name, args)
-  await authorizeOperation(workspace, decision.tier, name, args, decision.kind === 'read')
   signal?.throwIfAborted()
 
   if (workspace !== getWorkspace() || decision.tier !== getMachinePermission()) {
-    throw new Error('审批期间工作区或权限已变更，请重试')
+    throw new Error('操作期间工作区或权限已变更，请重试')
   }
   gate(name, args)
 

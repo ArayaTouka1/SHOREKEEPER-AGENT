@@ -28,19 +28,21 @@ if (!fs.existsSync(htmlPath)) {
 const html = fs.readFileSync(htmlPath, 'utf8')
 
 
-console.log('=== 1. 需求覆盖 ===')
+console.log('=== 1. 内容与结构 ===')
+// 当前官网为「角色温度 + 本机 Agent」版式，检查关键板块文案
 const required = [
-  ['软件介绍', '软件介绍'],
-  ['版权声明', '版权声明'],
-  ['软件下载', '软件下载'],
-  ['项目地址', '项目地址'],
-  ['本地 TTS 模型下载', '本地 TTS 模型下载']
+  ['产品定位', '有角色温度'],
+  ['权限说明', '权限可控'],
+  ['角色板块', '换一个角色'],
+  ['下载板块', '下载 Windows 版'],
+  ['版本号', '0.21.0'],
+  ['隐私说明', '不预置密钥']
 ]
 for (const [label, needle] of required) {
   check('含「' + label + '」', html.includes(needle))
 }
 
-for (const id of ['top', 'features', 'roles', 'gallery', 'download', 'tts', 'project', 'license']) {
+for (const id of ['top', 'why', 'roles', 'preview', 'download']) {
   check('锚点 id="' + id + '" 存在', html.includes('id="' + id + '"'))
 }
 
@@ -106,15 +108,14 @@ if (fs.existsSync(dlDir)) {
 console.log('\n=== 5. 脚本与样式 ===')
 const js = fs.readFileSync(path.join(WEB, 'assets', 'main.js'), 'utf8')
 const css = fs.readFileSync(path.join(WEB, 'assets', 'style.css'), 'utf8')
-check('main.js 版本与页面一致', js.includes("'" + version + "'"), 'js 里未找到 ' + version)
-check('main.js 含下载探测逻辑', js.includes('upgradeDownloads'))
-check('main.js 含哈希复制', js.includes('wireHashCopy'))
-check('style.css 含响应式断点', css.includes('@media (max-width: 860px)'))
-check('style.css 定义主题变量', css.includes('--accent-grad'))
+check('main.js 有角色切换交互', js.includes(".role") && js.includes('addEventListener'))
+check('main.js 有预览图切换逻辑', js.includes('role-shot'))
+check('style.css 含响应式断点', css.includes('@media'))
+check('style.css 定义主题变量', css.includes('--ink'))
 
 
 console.log('\n=== 6. 部署前待替换项（提示，不计失败）===')
-const placeholders = html.match(/&lt;your-name&gt;/g)
+const placeholders = html.match(/&lt;your-name&gt;|<your-name>/g)
 console.log('    项目地址占位符：' + (placeholders ? placeholders.length : 0) + ' 处（部署前替换为你的仓库地址）')
 
 

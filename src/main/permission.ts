@@ -227,7 +227,11 @@ export function checkPermission(
     }
   }
 
-  const targets = toolName === 'fs_copy' ? collectPaths({ dst: params?.dst ?? params?.to }) : collectPaths(params)
+  // A screenshot is saved by runTool under the active workspace in this tier.
+  // It has no caller-supplied path, so validate that fixed destination here.
+  const targets = toolName === 'take_screenshot'
+    ? [workspace]
+    : toolName === 'fs_copy' ? collectPaths({ dst: params?.dst ?? params?.to }) : collectPaths(params)
   if (!targets.length) {
     return {
       allowed: false,

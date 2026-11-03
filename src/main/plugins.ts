@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, rmSync, cpS
 import { join, resolve, relative, isAbsolute, extname } from 'node:path'
 import * as vm from 'node:vm'
 import { JsonStore } from './store'
+import { appFetch } from './network'
 import type {
   BrokenPlugin,
   PluginCommandInfo,
@@ -37,7 +38,10 @@ import type {
  * ------------------------------------------------------------------ */
 
 const LOAD_TIMEOUT_MS = 3000
-const INVOKE_TIMEOUT_MS = 5000
+const INVOKE_TIMEOUT_MS = 20000
+const PLUGIN_FETCH_TIMEOUT_MS = 12000
+const MAX_PLUGIN_RESPONSE_BYTES = 2 * 1024 * 1024
+const MAX_PLUGIN_UI_BYTES = 512 * 1024
 const MAX_RESULT_DEPTH = 8
 const MAX_LOGS = 50
 const MAX_LOG_LEN = 400
@@ -150,14 +154,76 @@ export function validateManifest(raw: unknown): ManifestCheck {
       const cname = typeof item === 'string' ? item.trim() : asString((item as Record<string, unknown>)?.name).trim()
       if (!CMD_RE.test(cname)) return { ok: false, error: `commands[${i}].name 不合法：${String(cname)}` }
       const src = typeof item === 'string' ? {} : ((item ?? {}) as Record<string, unknown>)
+      let params: NonNullable<PluginCommandSpec['params']> | undefined
+      if (Array.isArray(src.params)) {
+        params = []
+        for (let paramIndex = 0; paramIndex < src.params.length; paramIndex++) {
+          const param = (src.params[paramIndex] ?? {}) as Record<string, unknown>
+          const key = asString(param.key).trim()
+          if (!CMD_RE.test(key)) {
+            return { ok: false, error: `commands[${i}].params[${paramIndex}].key 不合法：${key}` }
+          }
+          params.push({
+            key,
+            label: asString(param.label).trim() || key,
+            required: param.required === true,
+            placeholder: asString(param.placeholder).trim(),
+            defaultValue: asString(param.defaultValue)
+          })
+        }
+      }
       commands.push({
         name: cname,
         label: asString(src.label).trim() || cname,
-        description: asString(src.description).trim()
+        description: asString(src.description).trim(),
+        ...(params?.length ? { params } : {})
       })
     }
     const dup = commands.map((c) => c.name).find((n, i, arr) => arr.indexOf(n) !== i)
     if (dup) return { ok: false, error: `commands 里有重复的命令名：${dup}` }
+  }
+
+  const rawPermissions = o.permissions && typeof o.permissions === 'object'
+    ? (o.permissions as Record<string, unknown>)
+    : {}
+  const network = Array.isArray(rawPermissions.network)
+    ? rawPermissions.network.map((item) => asString(item).trim().toLowerCase()).filter(Boolean)
+    : []
+  for (const host of network) {
+    if (!/^(?:\*\.)?[a-z0-9.-]+$/.test(host) || host.includes('..')) {
+      return { ok: false, error: `permissions.network 包含不合法的主机名：${host}` }
+    }
+  }
+
+  const rawContributes = o.contributes && typeof o.contributes === 'object'
+    ? (o.contributes as Record<string, unknown>)
+    : {}
+  const rawGlobalStyle = asString(rawContributes.globalStyle).trim()
+  if (rawGlobalStyle && !safeRelativeAsset(rawGlobalStyle, ['.css'])) {
+    return { ok: false, error: `contributes.globalStyle 必须是插件目录内的 .css 相对路径：${rawGlobalStyle}` }
+  }
+  const widgets: PluginManifest['contributes']['widgets'] = []
+  if (rawContributes.widgets !== undefined && !Array.isArray(rawContributes.widgets)) {
+    return { ok: false, error: 'contributes.widgets 必须是数组' }
+  }
+  for (const [index, rawWidget] of (rawContributes.widgets as unknown[] | undefined ?? []).entries()) {
+    const widget = (rawWidget ?? {}) as Record<string, unknown>
+    const widgetId = asString(widget.id).trim()
+    const entry = asString(widget.entry).trim()
+    const position = asString(widget.position, 'bottom-right') as PluginManifest['contributes']['widgets'][number]['position']
+    if (!CMD_RE.test(widgetId)) return { ok: false, error: `contributes.widgets[${index}].id 不合法：${widgetId}` }
+    if (!safeRelativeAsset(entry, ['.html', '.htm'])) return { ok: false, error: `挂件入口必须是插件目录内的 HTML：${entry}` }
+    if (!['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(position)) {
+      return { ok: false, error: `挂件位置不合法：${position}` }
+    }
+    widgets.push({
+      id: widgetId,
+      title: asString(widget.title).trim() || widgetId,
+      entry,
+      position,
+      width: Math.min(800, Math.max(120, Number(widget.width) || 320)),
+      height: Math.min(800, Math.max(80, Number(widget.height) || 240))
+    })
   }
 
   return {
@@ -171,8 +237,56 @@ export function validateManifest(raw: unknown): ManifestCheck {
       main,
       icon,
       enabled: typeof o.enabled === 'boolean' ? o.enabled : true,
-      commands
+      commands,
+      permissions: {
+        network: [...new Set(network)],
+        externalLinks: rawPermissions.externalLinks === true,
+        globalStyles: rawPermissions.globalStyles === true,
+        widgets: rawPermissions.widgets === true
+      },
+      contributes: { globalStyle: rawGlobalStyle || null, widgets }
     }
+  }
+}
+
+function safeRelativeAsset(value: string, extensions: string[]): boolean {
+  if (!value || isAbsolute(value) || /^[A-Za-z]:/.test(value)) return false
+  if (value.split(/[\\/]/).includes('..')) return false
+  return extensions.includes(extname(value).toLowerCase())
+}
+
+function hostAllowed(hostname: string, allowed: string[]): boolean {
+  const host = hostname.toLowerCase()
+  return allowed.some((entry) => entry.startsWith('*.')
+    ? host === entry.slice(2) || host.endsWith(entry.slice(1))
+    : host === entry)
+}
+
+async function pluginFetchJson(manifest: PluginManifest, rawUrl: unknown): Promise<unknown> {
+  if (typeof rawUrl !== 'string') throw new Error('fetchJson 需要 HTTPS URL')
+  const url = new URL(rawUrl)
+  if (url.protocol !== 'https:') throw new Error('插件网络请求仅允许 HTTPS')
+  if (!hostAllowed(url.hostname, manifest.permissions.network)) {
+    throw new Error(`插件未获准访问 ${url.hostname}，请在 plugin.json permissions.network 中声明`)
+  }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), PLUGIN_FETCH_TIMEOUT_MS)
+  try {
+    const response = await appFetch(url, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': `Shorekeeper-Agent/${app.getVersion()}`,
+        Referer: `${url.protocol}//${url.hostname}/`
+      }
+    })
+    if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`)
+    const declared = Number(response.headers.get('content-length') ?? 0)
+    if (declared > MAX_PLUGIN_RESPONSE_BYTES) throw new Error('响应超过插件网络上限（2 MiB）')
+    const text = await response.text()
+    if (Buffer.byteLength(text, 'utf8') > MAX_PLUGIN_RESPONSE_BYTES) throw new Error('响应超过插件网络上限（2 MiB）')
+    return JSON.parse(text)
+  } finally {
+    clearTimeout(timer)
   }
 }
 
@@ -430,7 +544,16 @@ function loadPlugin(manifest: PluginManifest, dir: string, builtin: boolean): Lo
     version: manifest.version,
     dir,
     appVersion: app.getVersion(),
-    now: () => Date.now()
+    now: () => Date.now(),
+    fetchJson: (url: unknown) => pluginFetchJson(manifest, url),
+    openExternal: async (rawUrl: unknown) => {
+      if (!manifest.permissions.externalLinks) throw new Error('插件没有 externalLinks 权限')
+      if (typeof rawUrl !== 'string') throw new Error('openExternal 需要 URL')
+      const url = new URL(rawUrl)
+      if (url.protocol !== 'https:') throw new Error('只允许打开 HTTPS 链接')
+      await shell.openExternal(url.toString())
+      return true
+    }
   })
 
   const context = vm.createContext(sandbox, {
@@ -497,8 +620,36 @@ function toInfo(p: LoadedPlugin): PluginInfo {
     commands: p.commandList.map((c) => ({ ...c })),
     missing: [...p.missing],
     logs: [...p.logs],
-    iconUrl: pluginIconDataUrl(p.manifest, p.dir)
+    iconUrl: pluginIconDataUrl(p.manifest, p.dir),
+    ui: loadUiContributions(p)
   }
+}
+
+function readUiAsset(plugin: LoadedPlugin, relativePath: string): string | null {
+  const target = resolve(plugin.dir, relativePath)
+  const rel = relative(plugin.dir, target)
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null
+  try {
+    if (!existsSync(target) || !statSync(target).isFile()) return null
+    if (statSync(target).size > MAX_PLUGIN_UI_BYTES) return null
+    return readFileSync(target, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+function loadUiContributions(plugin: LoadedPlugin): PluginInfo['ui'] {
+  if (!plugin.enabled || !plugin.loaded) return { cssText: null, widgets: [] }
+  const cssText = plugin.manifest.permissions.globalStyles && plugin.manifest.contributes.globalStyle
+    ? readUiAsset(plugin, plugin.manifest.contributes.globalStyle)
+    : null
+  const widgets = plugin.manifest.permissions.widgets
+    ? plugin.manifest.contributes.widgets.flatMap((widget) => {
+        const html = readUiAsset(plugin, widget.entry)
+        return html === null ? [] : [{ ...widget, html }]
+      })
+    : []
+  return { cssText, widgets }
 }
 
 export function listPlugins(): PluginListResult {

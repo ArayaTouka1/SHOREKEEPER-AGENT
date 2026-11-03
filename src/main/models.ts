@@ -4,6 +4,7 @@
 
 import { JsonStore } from './store'
 import type { ModelInfo, ModelState } from '../shared/types'
+import { appFetch } from './network'
 
 /* ------------------------------------------------------------------ *
  * ------------------------------------------------------------------ */
@@ -66,14 +67,25 @@ export const BUILTIN_API_MODELS: ModelInfo[] = [
 
   {
     id: 'api_kimi_k2',
-    name: 'Kimi K2',
+    name: 'Kimi K2.6',
     kind: 'api',
     provider: 'moonshot',
     baseUrl: 'https://api.moonshot.cn/v1',
-    model: 'kimi-k2-0905-preview',
+    model: 'kimi-k2.6',
     needKey: true,
     available: true,
-    note: '最新旗舰，长上下文'
+    note: '通用旗舰，支持长上下文与工具调用'
+  },
+  {
+    id: 'api_kimi_k3',
+    name: 'Kimi K3',
+    kind: 'api',
+    provider: 'moonshot',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'kimi-k3',
+    needKey: true,
+    available: true,
+    note: '最新旗舰，适合复杂知识工作'
   },
   {
     id: 'api_kimi_long',
@@ -179,11 +191,11 @@ export const BUILTIN_API_MODELS: ModelInfo[] = [
 
   {
     id: 'api_siliconflow_ds',
-    name: '硅基流动 · DeepSeek',
+    name: '硅基流动 · DeepSeek V4 Flash',
     kind: 'api',
     provider: 'siliconflow',
     baseUrl: 'https://api.siliconflow.cn/v1',
-    model: 'deepseek-ai/DeepSeek-V3',
+    model: 'deepseek-ai/DeepSeek-V4-Flash',
     needKey: true,
     available: true,
     note: '国内直连，聚合平台'
@@ -202,22 +214,22 @@ export const BUILTIN_API_MODELS: ModelInfo[] = [
 
   {
     id: 'api_minimax',
-    name: 'MiniMax',
+    name: 'MiniMax M3',
     kind: 'api',
     provider: 'minimax',
-    baseUrl: 'https://api.minimax.chat/v1',
-    model: 'abab6.5s-chat',
+    baseUrl: 'https://api.minimax.io/v1',
+    model: 'MiniMax-M3',
     needKey: true,
     available: true,
     note: '国产，中文口语好'
   },
   {
     id: 'api_baichuan',
-    name: '百川',
+    name: '百川 Baichuan4 Turbo',
     kind: 'api',
     provider: 'baichuan',
     baseUrl: 'https://api.baichuan-ai.com/v1',
-    model: 'Baichuan4',
+    model: 'Baichuan4-Turbo',
     needKey: true,
     available: true,
     note: '国产'
@@ -246,11 +258,11 @@ export const BUILTIN_API_MODELS: ModelInfo[] = [
   },
   {
     id: 'api_hunyuan',
-    name: '腾讯混元',
+    name: '腾讯混元 Hy3',
     kind: 'api',
     provider: 'tencent',
-    baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1',
-    model: 'hunyuan-turbo',
+    baseUrl: 'https://tokenhub.tencentmaas.com/v1',
+    model: 'hy3-preview',
     needKey: true,
     available: true,
     note: '腾讯云'
@@ -261,7 +273,7 @@ export const BUILTIN_API_MODELS: ModelInfo[] = [
     kind: 'api',
     provider: 'openrouter',
     baseUrl: 'https://openrouter.ai/api/v1',
-    model: 'anthropic/claude-3.5-sonnet',
+    model: 'openrouter/free',
     needKey: true,
     available: true,
     note: '一个 Key 接多家模型'
@@ -335,7 +347,8 @@ export const BUILTIN_LOCAL_MODELS: ModelInfo[] = [
 const DEFAULT_STATE: ModelState = {
   activeId: 'api_deepseek_flash',
   custom: [],
-  localConnections: {}
+  localConnections: {},
+  providerKeys: {}
 }
 
 export const modelStore = new JsonStore<ModelState>('models', () => structuredClone(DEFAULT_STATE))
@@ -360,13 +373,48 @@ export const modelRepo = {
       s.localConnections = {}
       dirty = true
     }
+    if (!s.providerKeys || typeof s.providerKeys !== 'object') {
+      s.providerKeys = {}
+      dirty = true
+    }
+    for (const builtin of builtinModels()) {
+      const legacyKey = s.overrides?.[builtin.id]?.apiKey
+      if (legacyKey !== undefined) {
+        if (!s.providerKeys[builtin.provider] && legacyKey.trim()) s.providerKeys[builtin.provider] = legacyKey.trim()
+        delete s.overrides![builtin.id].apiKey
+        dirty = true
+      }
+    }
+    if (s.overrides?.api_kimi_k2?.model === 'kimi-k2-0905-preview') {
+      delete s.overrides.api_kimi_k2.model
+      dirty = true
+    }
+    const retiredDefaults: Record<string, { baseUrl?: string; model?: string }> = {
+      api_siliconflow_ds: { model: 'deepseek-ai/DeepSeek-V3' },
+      api_minimax: { baseUrl: 'https://api.minimax.chat/v1', model: 'abab6.5s-chat' },
+      api_baichuan: { model: 'Baichuan4' },
+      api_hunyuan: { baseUrl: 'https://api.hunyuan.cloud.tencent.com/v1', model: 'hunyuan-turbo' },
+      api_openrouter: { model: 'anthropic/claude-3.5-sonnet' }
+    }
+    for (const [id, retired] of Object.entries(retiredDefaults)) {
+      const override = s.overrides?.[id]
+      if (!override) continue
+      if (retired.baseUrl && override.baseUrl === retired.baseUrl) { delete override.baseUrl; dirty = true }
+      if (retired.model && override.model === retired.model) { delete override.model; dirty = true }
+    }
     if (dirty) modelStore.write(s)
     return s
   },
 
   list(): ModelInfo[] {
     const s = this.state()
-    const all = [...builtinModels().map(m => ({ ...m, ...s.overrides?.[m.id] })), ...s.custom]
+    const all = [
+      ...builtinModels().map(m => {
+        const override = s.overrides?.[m.id]
+        return { ...m, ...override, apiKey: override?.apiKey ?? s.providerKeys?.[m.provider] ?? m.apiKey }
+      }),
+      ...s.custom
+    ]
     return all.map((m) => {
       if (m.kind !== 'local') return m
       const at = s.localConnections[m.id]
@@ -468,7 +516,17 @@ export const modelRepo = {
       if (allowed.baseUrl !== undefined && !/^https?:\/\//.test(allowed.baseUrl)) throw new Error('Base URL 必须使用 HTTP 或 HTTPS')
       if (allowed.model !== undefined && !allowed.model) throw new Error('模型标识不能为空')
       if (idx >= 0) s.custom[idx] = { ...s.custom[idx], ...allowed, id }
-      else if (builtinModels().some(m => m.id === id)) { s.overrides ??= {}; s.overrides[id] = { ...s.overrides[id], ...allowed } }
+      else if (builtinModels().some(m => m.id === id)) {
+        const builtin = builtinModels().find(m => m.id === id)!
+        s.overrides ??= {}
+        s.providerKeys ??= {}
+        if (allowed.apiKey !== undefined) s.providerKeys[builtin.provider] = allowed.apiKey
+        const perModel = { ...allowed }
+        delete perModel.apiKey
+        const previous = { ...s.overrides[id] }
+        delete previous.apiKey
+        s.overrides[id] = { ...previous, ...perModel }
+      }
       else throw new Error('模型不存在')
       delete s.localConnections[id]
     })
@@ -478,31 +536,103 @@ export const modelRepo = {
 /* ------------------------------------------------------------------ *
  * ------------------------------------------------------------------ */
 
+/**
+ * 探测一个 OpenAI 兼容端点是否可用。
+ *
+ * 判定策略（重要）：
+ *   `/models` 返回的列表**不能**作为「模型是否可用」的判据 —— 很多服务商
+ *   （Kimi / 部分中转站）的列表不完整或滞后，模型实际可以调用却不在列表里。
+ *   之前的实现直接判失败，表现为「服务可达，但模型 ID 不在列表中」的误报。
+ *
+ * 现在的顺序：
+ *   1. 有 model 时：直接发一次最小 chat/completions —— 成功即可用（权威判据）
+ *   2. 鉴权/额度类错误（401/403/402）如实报错
+ *   3. 没给 model 时：才用 /models 列表判断服务是否可达
+ */
 export async function probeEndpoint(
-  baseUrl: string, apiKey: string | undefined, timeoutMs = 8000, model?: string
+  baseUrl: string, apiKey: string | undefined, timeoutMs = 15000, model?: string
 ): Promise<{ ok: boolean; message: string; models?: string[] }> {
   const base = baseUrl.replace(/\/+$/, '')
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  try {
-    const response = await fetch(base + '/models', { signal: controller.signal, headers: apiKey ? { Authorization: 'Bearer ' + apiKey } : {} })
-    if (response.ok) {
-      const body = await response.json() as any
-      const models: string[] = Array.isArray(body?.data) ? body.data.map((m: any) => String(m.id)) : []
-      if (!models.length) return { ok: false, message: '服务未返回可用模型列表' }
-      if (model && !models.includes(model)) return { ok: false, message: '服务可达，但模型 ID 不在列表中：' + model, models }
-      return { ok: true, message: '模型已由服务确认：' + (model || models.join(', ')), models }
+  const auth: Record<string, string> = apiKey ? { Authorization: 'Bearer ' + apiKey } : {}
+
+  /** 拉一次 /models（仅用于展示与辅助判断，失败不影响结论） */
+  const listModels = async (): Promise<string[]> => {
+    try {
+      const ctl = new AbortController()
+      const timer = setTimeout(() => ctl.abort(), Math.min(timeoutMs, 8000))
+      try {
+        const res = await appFetch(base + '/models', { signal: ctl.signal, headers: auth })
+        if (!res.ok) return []
+        const body = (await res.json()) as { data?: Array<{ id?: unknown }> }
+        return Array.isArray(body?.data) ? body.data.map((m) => String(m.id ?? '')).filter(Boolean) : []
+      } finally {
+        clearTimeout(timer)
+      }
+    } catch {
+      return []
     }
-    if (![404, 405].includes(response.status) || !model) return { ok: false, message: '模型探测失败，HTTP ' + response.status }
-    const chat = await fetch(base + '/chat/completions', {
-      method: 'POST', signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', ...(apiKey ? { Authorization: 'Bearer ' + apiKey } : {}) },
-      body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false })
-    })
-    if (!chat.ok) return { ok: false, message: '模型测试失败，HTTP ' + chat.status }
-    const result = await chat.json() as any
-    return { ok: !!result?.choices?.length, message: result?.choices?.length ? '模型调用成功：' + model : '服务未返回模型响应' }
-  } catch (error) {
-    return { ok: false, message: controller.signal.aborted ? '模型探测超时' : String(error instanceof Error ? error.message : error) }
-  } finally { clearTimeout(timer) }
+  }
+
+  // 1) 有 model：实测调用（权威判据）
+  if (model) {
+    const ctl = new AbortController()
+    const timer = setTimeout(() => ctl.abort(), timeoutMs)
+    try {
+      const chat = await appFetch(base + '/chat/completions', {
+        method: 'POST',
+        signal: ctl.signal,
+        headers: { 'Content-Type': 'application/json', ...auth },
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false })
+      })
+      if (chat.ok) {
+        const models = await listModels()
+        return { ok: true, message: '连接成功，模型可调用：' + model, models }
+      }
+      // 读错误体，给出服务商的原始说明
+      let detail = ''
+      try {
+        const text = await chat.text()
+        const parsed = JSON.parse(text) as { error?: { message?: string }; message?: string }
+        detail = parsed?.error?.message ?? parsed?.message ?? text.slice(0, 200)
+      } catch {
+        /* 忽略解析失败 */
+      }
+      const status = chat.status
+      // 鉴权 / 额度问题：明确告知，不要误导成「模型不存在」
+      if (status === 401 || status === 403) {
+        return { ok: false, message: 'API Key 无效或无权限（HTTP ' + status + '）' + (detail ? '：' + detail : '') }
+      }
+      if (status === 402) {
+        return { ok: false, message: '账户额度不足（HTTP 402）' + (detail ? '：' + detail : '') }
+      }
+      if (status === 404) {
+        // 404 可能是模型名错，也可能是端点不支持 chat/completions
+        const models = await listModels()
+        return {
+          ok: false,
+          message: '模型不存在或端点不支持 chat/completions（HTTP 404）' + (detail ? '：' + detail : ''),
+          models
+        }
+      }
+      if (status === 429) {
+        // 限流说明 key 和模型都是对的，只是请求太频
+        const models = await listModels()
+        return { ok: true, message: '连接成功（当前被限流，模型可用）：' + model, models }
+      }
+      const models = await listModels()
+      return { ok: false, message: '模型调用失败，HTTP ' + status + (detail ? '：' + detail : ''), models }
+    } catch (error) {
+      return {
+        ok: false,
+        message: ctl.signal.aborted ? '模型探测超时（' + timeoutMs + 'ms）' : '模型探测失败：' + String(error instanceof Error ? error.message : error)
+      }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  // 2) 没给 model：用 /models 判断服务可达性
+  const models = await listModels()
+  if (models.length) return { ok: true, message: '服务可达，可用模型 ' + models.length + ' 个', models }
+  return { ok: false, message: '服务不可达，或未返回可用模型列表' }
 }

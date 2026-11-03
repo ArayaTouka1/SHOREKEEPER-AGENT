@@ -1,5 +1,28 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import type { PluginInfo, PluginListResult } from '../../../../shared/types'
+import { notifyPluginRuntimeChanged } from '../../components/PluginRuntime'
+
+interface PluginAudioTrack {
+  id: string
+  title: string
+  artist: string
+  album?: string
+  cover?: string
+  audioUrl: string
+  pageUrl: string
+}
+
+function asAudioTracks(value: unknown): PluginAudioTrack[] | null {
+  if (!value || typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  if (record.type !== 'audio-list' || !Array.isArray(record.tracks)) return null
+  const tracks = record.tracks.filter((item): item is PluginAudioTrack => {
+    if (!item || typeof item !== 'object') return false
+    const track = item as Record<string, unknown>
+    return ['id', 'title', 'artist', 'audioUrl', 'pageUrl'].every((key) => typeof track[key] === 'string')
+  })
+  return tracks.length ? tracks : null
+}
 
 /* ==================================================================
    插件 —— 用户可扩展能力
@@ -25,12 +48,16 @@ export default function PluginSection(): React.ReactElement {
   const [busy, setBusy] = useState('')
   const [flash, setFlash] = useState('')
   const [err, setErr] = useState('')
-  const [outputs, setOutputs] = useState<Record<string, { ok: boolean; text: string }>>({})
+  const [outputs, setOutputs] = useState<Record<string, { ok: boolean; text: string; result?: unknown }>>({})
+  const [commandArgs, setCommandArgs] = useState<Record<string, string>>({})
   const [logFor, setLogFor] = useState<string | null>(null)
 
   const load = useCallback(async (): Promise<void> => {
     const res = await window.aimis.plugin.list()
-    if (res.ok && res.data) setData(res.data)
+    if (res.ok && res.data) {
+      setData(res.data)
+      notifyPluginRuntimeChanged()
+    }
     else setErr(res.error ?? '读取插件列表失败')
   }, [])
 
@@ -52,6 +79,7 @@ export default function PluginSection(): React.ReactElement {
   const applyList = (res: { ok: boolean; data?: PluginListResult | null; error?: string }): void => {
     if (res.ok && res.data) {
       setData(res.data)
+      notifyPluginRuntimeChanged()
       return
     }
     if (res.ok) return
@@ -68,6 +96,7 @@ export default function PluginSection(): React.ReactElement {
       }
       if (!res.data) return // 用户取消
       setData(res.data.list)
+      notifyPluginRuntimeChanged()
       say(`${res.data.replaced ? '已覆盖并导入' : '已导入'}：${res.data.plugin?.manifest.name ?? ''}`)
     } finally {
       setBusy('')
@@ -98,7 +127,17 @@ export default function PluginSection(): React.ReactElement {
     const key = `${p.manifest.id}:${command}`
     setBusy(key)
     try {
-      const res = await window.aimis.plugin.invoke(p.manifest.id, command, {})
+      const spec = p.commands.find((item) => item.name === command)
+      const args = Object.fromEntries((spec?.params ?? []).map((param) => {
+        const inputKey = `${key}:${param.key}`
+        return [param.key, commandArgs[inputKey] ?? param.defaultValue ?? '']
+      }))
+      const missing = (spec?.params ?? []).find((param) => param.required && !String(args[param.key] ?? '').trim())
+      if (missing) {
+        setOutputs((prev) => ({ ...prev, [key]: { ok: false, text: `请填写：${missing.label}` } }))
+        return
+      }
+      const res = await window.aimis.plugin.invoke(p.manifest.id, command, args)
       if (!res.ok) {
         setOutputs((prev) => ({ ...prev, [key]: { ok: false, text: '调用失败：' + (res.error ?? '未知错误') } }))
         return
@@ -112,7 +151,8 @@ export default function PluginSection(): React.ReactElement {
         ...prev,
         [key]: {
           ok: r.ok,
-          text: r.ok ? formatResult(r.result) + `  （${r.ms}ms）` : '插件报错：' + (r.error ?? '未知错误')
+          text: r.ok ? formatResult(r.result) + `  （${r.ms}ms）` : '插件报错：' + (r.error ?? '未知错误'),
+          result: r.ok ? r.result : undefined
         }
       }))
     } finally {
@@ -135,7 +175,7 @@ export default function PluginSection(): React.ReactElement {
       <div className="sec-desc">
         把一个文件夹丢进 <span className="mono">{data?.dir ?? '%APPDATA%/shorekeeper-agent/plugins'}</span>，
         里面放 <span className="mono">plugin.json</span> 和入口 JS，就能在这里启用、运行。
-        插件脚本跑在受限沙箱里（没有 require / process / fs）。
+        插件脚本跑在受限沙箱里（没有 require / process / fs），并可按清单声明命令、全局样式和沙箱挂件。
       </div>
 
       {/* 工具栏 */}
@@ -149,7 +189,7 @@ export default function PluginSection(): React.ReactElement {
               className="btn sm"
               data-testid="plugin-refresh"
               onClick={() => void load()}
-              title="重新扫描插件目录（刚复制进来的文件夹点这里就能看到）"
+              aria-label="重新扫描插件目录（刚复制进来的文件夹点这里就能看到）"
             >
               刷新
             </button>
@@ -157,7 +197,7 @@ export default function PluginSection(): React.ReactElement {
               className="btn sm"
               data-testid="plugin-open-dir"
               onClick={() => void doReveal()}
-              title="在资源管理器里打开插件目录"
+              aria-label="在资源管理器里打开插件目录"
             >
               打开插件目录
             </button>
@@ -220,7 +260,6 @@ export default function PluginSection(): React.ReactElement {
                 ) : (
                   <div
                     data-testid={`plugin-icon-placeholder-${m.id}`}
-                    title="清单里没有声明 icon，这是首字母占位图"
                     style={{
                       width: 64,
                       height: 64,
@@ -266,7 +305,7 @@ export default function PluginSection(): React.ReactElement {
                         className={`switch ${p.enabled ? 'on' : ''}`}
                         data-testid={`plugin-toggle-${m.id}`}
                         disabled={busy === 'toggle:' + m.id}
-                        title={p.enabled ? '停用这个插件' : '启用这个插件'}
+                        aria-label={p.enabled ? '停用这个插件' : '启用这个插件'}
                         onClick={() => void doToggle(p)}
                       />
                     </div>
@@ -285,6 +324,12 @@ export default function PluginSection(): React.ReactElement {
                       {m.description}
                     </div>
                   )}
+
+                  <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBottom: 6 }}>
+                    {m.permissions.network.length > 0 && <span className="mono">联网：{m.permissions.network.join(', ')}</span>}
+                    {m.permissions.globalStyles && <span className="mono">全局外观</span>}
+                    {m.permissions.widgets && <span className="mono">桌面挂件</span>}
+                  </div>
 
                   <div className="mono truncate" style={{ color: 'var(--text-4)' }} title={p.dir}>
                     {p.dir}
@@ -310,6 +355,7 @@ export default function PluginSection(): React.ReactElement {
                   {p.commands.map((c) => {
                     const key = `${m.id}:${c.name}`
                     const out = outputs[key]
+                    const audioTracks = out?.ok ? asAudioTracks(out.result) : null
                     const running = busy === key
                     const runnable = p.enabled && c.registered
                     return (
@@ -319,7 +365,7 @@ export default function PluginSection(): React.ReactElement {
                             className="btn sm"
                             data-testid={`plugin-run-${m.id}-${c.name}`}
                             disabled={!runnable || running}
-                            title={
+                            aria-label={
                               !p.enabled
                                 ? '插件已停用，先启用'
                                 : !c.registered
@@ -338,7 +384,48 @@ export default function PluginSection(): React.ReactElement {
                             </div>
                           </div>
                         </div>
+                        {(c.params ?? []).length > 0 && (
+                          <div className="row" style={{ gap: 8, flexWrap: 'wrap', paddingLeft: 70 }}>
+                            {(c.params ?? []).map((param) => {
+                              const inputKey = `${key}:${param.key}`
+                              return (
+                                <label key={param.key} style={{ minWidth: 180, flex: '1 1 220px' }}>
+                                  <div className="field-hint" style={{ marginBottom: 4 }}>
+                                    {param.label}{param.required ? ' *' : ''}
+                                  </div>
+                                  <input
+                                    className="input"
+                                    value={commandArgs[inputKey] ?? param.defaultValue ?? ''}
+                                    placeholder={param.placeholder}
+                                    onChange={(event) => setCommandArgs((prev) => ({ ...prev, [inputKey]: event.target.value }))}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter' && runnable && !running) void doRun(p, c.name)
+                                    }}
+                                  />
+                                </label>
+                              )
+                            })}
+                          </div>
+                        )}
+                        {audioTracks && (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {audioTracks.map((track) => (
+                              <div key={track.id} className="card" style={{ padding: 10, display: 'flex', gap: 10, alignItems: 'center' }}>
+                                {track.cover && <img src={track.cover} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover' }} />}
+                                <div style={{ minWidth: 0, flex: 1 }}>
+                                  <div className="truncate" style={{ fontSize: 12.5 }}>{track.title}</div>
+                                  <div className="truncate" style={{ color: 'var(--text-4)', fontSize: 11 }}>{track.artist}{track.album ? ` · ${track.album}` : ''}</div>
+                                  <audio controls preload="none" src={track.audioUrl} style={{ width: '100%', height: 32, marginTop: 5 }} />
+                                </div>
+                                <button className="btn ghost sm" onClick={() => void window.aimis.system.openExternal(track.pageUrl)}>
+                                  网易云打开
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                         {out && (
+                          audioTracks ? null : (
                           <pre
                             data-testid={`plugin-out-${m.id}-${c.name}`}
                             style={{
@@ -359,6 +446,7 @@ export default function PluginSection(): React.ReactElement {
                           >
                             {out.text}
                           </pre>
+                          )
                         )}
                       </div>
                     )
@@ -375,7 +463,7 @@ export default function PluginSection(): React.ReactElement {
                 <button className="btn ghost sm" onClick={() => setLogFor(logsOpen ? null : m.id)}>
                   {logsOpen ? '收起日志' : `日志（${p.logs.length}）`}
                 </button>
-                <button className="btn ghost sm" onClick={() => void doReveal(m.id)} title="在资源管理器里打开这个插件的目录">
+                <button className="btn ghost sm" onClick={() => void doReveal(m.id)}>
                   打开目录
                 </button>
                 {!p.builtin && (

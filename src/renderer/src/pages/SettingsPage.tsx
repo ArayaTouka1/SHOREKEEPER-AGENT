@@ -4,16 +4,24 @@ import Avatar from '../components/Avatar'
 import { Collapsible, EmptyHint, Field, SectionHeader, SliderField, SwitchRow } from '../components/ui'
 import CharacterSection from './settings/CharacterSection'
 import VoiceSection from './settings/VoiceSection'
+import VoiceCallSection from './settings/VoiceCallSection'
+import ModelConnectionGuide from './settings/ModelConnectionGuide'
 import BackgroundSection from './settings/BackgroundSection'
 import ModelSection from './settings/ModelSection'
 import PluginSection from './settings/PluginSection'
 import StickerPanel from './settings/StickerPanel'
+import ChatSectionModule from './settings/ChatSection'
+import CoopSectionModule from './settings/CoopSection'
+import MemorySectionModule from './settings/MemorySection'
+import ToolsSectionModule from './settings/ToolsSection'
 import RunningAppsPanel from '../components/RunningAppsPanel'
 import type { ThemeTokens } from '../../../shared/types'
+import './settings/settings.css'
 
 type Section =
   | 'character'
   | 'voice'
+  | 'voiceCall'
   | 'theme'
   | 'model'
   | 'general'
@@ -28,6 +36,7 @@ type Section =
 const SECTIONS: Array<{ key: Section; label: string; icon: string }> = [
   { key: 'character', label: '角色与羁绊', icon: '◍' },
   { key: 'voice', label: '语音', icon: '♪' },
+  { key: 'voiceCall', label: '语音通话', icon: '☎' },
   { key: 'sticker', label: '表情包', icon: '☺' },
   { key: 'theme', label: '主题', icon: '◐' },
   { key: 'general', label: '常规', icon: '⚙' },
@@ -66,7 +75,7 @@ export default function SettingsPage(): React.ReactElement {
         }}
       >
         <div style={{ fontSize: 11, letterSpacing: '0.16em', color: 'var(--text-4)', padding: '0 10px 12px' }}>
-          COMPANION OS
+          SHOREKEEPER · 共鸣终端
         </div>
         {SECTIONS.map((s) => (
           <button
@@ -93,20 +102,22 @@ export default function SettingsPage(): React.ReactElement {
               </>
             )}
             {section === 'voice' && <VoiceSection />}
+            {section === 'voiceCall' && <VoiceCallSection />}
             {section === 'sticker' && <StickerPanel />}
             {section === 'theme' && <ThemeSection />}
             {section === 'general' && <GeneralSection />}
             {/* 「模型」与「AI 与 API」已整合为一页：AI 与 API 卡片在上，模型清单在下 */}
             {section === 'model' && (
               <>
+                <ModelConnectionGuide />
                 <AiSection />
                 <ModelSection />
               </>
             )}
-            {section === 'chat' && <ChatSection />}
-            {section === 'coop' && <CoopSection />}
-            {section === 'memory' && <MemorySection />}
-            {section === 'tools' && <ToolsSection />}
+            {section === 'chat' && <ChatSectionModule />}
+            {section === 'coop' && <CoopSectionModule />}
+            {section === 'memory' && <MemorySectionModule />}
+            {section === 'tools' && <ToolsSectionModule />}
             {section === 'plugin' && <PluginSection />}
           </div>
         </div>
@@ -118,50 +129,6 @@ export default function SettingsPage(): React.ReactElement {
         </div>
       </div>
 
-      <style>{`
-        .settings-notice {
-          margin: 0 36px 14px;
-          padding: 10px 16px;
-          border-radius: 12px;
-          border: 1px solid var(--stroke);
-          background: var(--glass);
-          color: var(--text-4);
-          font-size: 11.5px;
-          line-height: 1.8;
-          text-align: center;
-          flex-shrink: 0;
-        }
-        .set-item {
-          display: flex; align-items: center; gap: 9px;
-          width: 100%; text-align: left;
-          padding: 9px 12px; border-radius: 12px;
-          font-size: 13px; color: var(--text-2);
-          transition: all 180ms var(--ease);
-          margin-bottom: 2px;
-        }
-        .set-item:hover { background: var(--glass-hover); color: var(--text-1); }
-        .set-item.active {
-          background: var(--accent-grad);
-          color: #fff;
-          box-shadow: var(--glow);
-        }
-        .set-icon { font-size: 12px; opacity: 0.9; width: 15px; text-align: center; }
-        .sec-title { font-size: 22px; font-weight: 600; margin-bottom: 6px; }
-        .sec-desc { font-size: 12.5px; color: var(--text-3); margin-bottom: 22px; }
-        .pick-card {
-          text-align: left; padding: 12px 14px; border-radius: 14px;
-          border: 1px solid var(--stroke);
-          background: var(--glass);
-          transition: all 200ms var(--ease);
-        }
-        .pick-card:hover { border-color: var(--accent); transform: translateY(-1px); }
-        .pick-card.on {
-          background: var(--accent-grad); color: #fff; border-color: transparent;
-          box-shadow: var(--glow);
-        }
-        .pick-card.on .pick-desc { color: rgba(255,255,255,0.82); }
-        .pick-desc { font-size: 11px; color: var(--text-4); line-height: 1.5; }
-      `}</style>
     </div>
   )
 }
@@ -180,13 +147,16 @@ const TOKEN_FIELDS: Array<{ key: keyof ThemeTokens; label: string }> = [
   { key: 'accentGradFrom', label: '主渐变 起' },
   { key: 'accentGradMid', label: '主渐变 中' },
   { key: 'accentGradTo', label: '主渐变 止' },
-  { key: 'text1', label: '文字 主' },
-  { key: 'text2', label: '文字 次' },
-  { key: 'text3', label: '文字 弱' },
-  { key: 'text4', label: '文字 最弱' },
   { key: 'bubbleUserFrom', label: '用户气泡 起' },
   { key: 'bubbleUserTo', label: '用户气泡 止' },
   { key: 'bubbleChar', label: '角色气泡底色' }
+]
+
+const TEXT_COLOR_FIELDS: Array<{ key: keyof ThemeTokens; label: string; sample: string }> = [
+  { key: 'text1', label: '主文字', sample: '标题与主要内容' },
+  { key: 'text2', label: '次级文字', sample: '常规说明与正文' },
+  { key: 'text3', label: '辅助文字', sample: '字段说明与提示' },
+  { key: 'text4', label: '弱化文字', sample: '次要标签与补充信息' }
 ]
 
 function ThemeSection(): React.ReactElement {
@@ -213,7 +183,7 @@ function ThemeSection(): React.ReactElement {
     const coerced = key === 'uiOpacity' ? (Number(value) as unknown as string) : value
     if (!isCustomActive) {
       await forkThemePreset(theme.activeId)
-      window.setTimeout(() => void patchCustomTheme({ [key]: coerced } as Partial<ThemeTokens>), 80)
+      await patchCustomTheme({ [key]: coerced } as Partial<ThemeTokens>)
       return
     }
     await patchCustomTheme({ [key]: coerced } as Partial<ThemeTokens>)
@@ -259,8 +229,8 @@ function ThemeSection(): React.ReactElement {
                     }}
                   />
                   <div className="grow">
-                    <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</div>
-                    <div className="pick-desc">{p.desc}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-1)' }}>{p.name}</div>
+                    <div className="pick-desc" style={{ color: 'var(--text-3)' }}>{p.desc}</div>
                   </div>
                   {on && <span style={{ fontSize: 11 }}>✓</span>}
                 </div>
@@ -274,6 +244,26 @@ function ThemeSection(): React.ReactElement {
                 </div>
               </button>
             )
+          })}
+        </div>
+      </div>
+
+      <div className="card card-pad" style={{ marginBottom: 18 }} data-testid="theme-font-colors">
+        <div className="card-title">字体颜色</div>
+        <div className="field-hint" style={{ margin: '-4px 0 14px' }}>分别调整标题、正文、提示和次要标签的颜色，改动会即时应用到整个界面。</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
+          {TEXT_COLOR_FIELDS.map((field) => {
+            const raw = editingTokens ? String(editingTokens[field.key] ?? '') : ''
+            const isHex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(raw)
+            return <div key={field.key} className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+              {isHex ? <input type="color" aria-label={`${field.label}颜色`} value={raw} onChange={(event) => void applyPatch(field.key, event.target.value)} />
+                : <span style={{ width: 46, height: 30, flexShrink: 0, borderRadius: 8, background: raw || 'transparent', border: '1px solid var(--stroke)' }} />}
+              <div className="grow">
+                <div style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 4 }}>{field.label}</div>
+                <input className="input" aria-label={`${field.label}颜色值`} style={{ padding: '5px 9px', fontSize: 11 }} value={raw} onChange={(event) => void applyPatch(field.key, event.target.value)} placeholder="#40556b" />
+                <div style={{ color: raw || 'var(--text-3)', fontSize: 12, marginTop: 5 }}>{field.sample}</div>
+              </div>
+            </div>
           })}
         </div>
       </div>
@@ -415,7 +405,7 @@ function ThemeSection(): React.ReactElement {
                     <span style={{ fontSize: 13 }}>{p.name}</span>
                   </div>
                 </button>
-                <button className="btn ghost sm danger" onClick={() => void deleteSavedTheme(p.id)} title="删除">
+                <button className="btn ghost sm danger" onClick={() => void deleteSavedTheme(p.id)} aria-label="删除">
                   ×
                 </button>
               </div>
@@ -437,15 +427,32 @@ function ThemeSection(): React.ReactElement {
 
 function GeneralSection(): React.ReactElement {
   const { settings, saveSettings, character, workspace, pickWorkspace, refreshWorkspace } = useApp()
+  const [proxyRules, setProxyRules] = useState('')
+  const [proxyBypassRules, setProxyBypassRules] = useState('<local>')
+  useEffect(() => {
+    if (!settings) return
+    setProxyRules(settings.network.proxyRules)
+    setProxyBypassRules(settings.network.proxyBypassRules)
+  }, [settings?.network.proxyRules, settings?.network.proxyBypassRules])
   const [picking, setPicking] = useState(false)
+  const [updateState, setUpdateState] = useState<{ status: string; message: string; percent?: number }>({ status: 'idle', message: '尚未检查更新' })
 
   useEffect(() => {
     void refreshWorkspace()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    const unsubscribe = window.aimis.appUpdate.onState(setUpdateState)
+    void window.aimis.appUpdate.state().then((result) => {
+      if (result.ok && result.data) setUpdateState(result.data)
+    })
+    return unsubscribe
+  }, [])
+
   if (!settings) return <></>
   const g = settings.general
+  const network = settings.network
   const a = settings.agent
 
   return (
@@ -510,6 +517,63 @@ function GeneralSection(): React.ReactElement {
           on={g.launchOnStartup}
           onChange={(v) => void saveSettings({ general: { ...g, launchOnStartup: v } })}
         />
+        <SwitchRow
+          title="自动检查并下载更新"
+          desc="启动后自动检查新版本并在后台下载；关闭后可在这里手动检查。"
+          on={g.autoUpdateEnabled}
+          onChange={(v) => void saveSettings({ general: { ...g, autoUpdateEnabled: v } })}
+        />
+        <div className="row" style={{ gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+          <button className="btn sm" disabled={updateState.status === 'checking' || updateState.status === 'downloading'} onClick={() => void window.aimis.appUpdate.check()}>
+            {updateState.status === 'checking' ? '正在检查…' : updateState.status === 'downloading' ? `下载中 ${Math.floor(updateState.percent ?? 0)}%` : '检查更新'}
+          </button>
+          {updateState.status === 'ready' && <button className="btn sm primary" onClick={() => void window.aimis.appUpdate.install()}>立即重启安装</button>}
+          <span className="field-hint" style={{ alignSelf: 'center' }}>{updateState.message}</span>
+        </div>
+      </div>
+
+      {/* Agent 能力 */}
+      <div className="card card-pad" style={{ marginBottom: 18 }}>
+        <div className="card-title">网络与代理</div>
+        <div className="field">
+          <span className="field-label">联网方式</span>
+          <select
+            className="input"
+            value={network.mode}
+            onChange={(e) => void saveSettings({ network: { ...network, mode: e.target.value as typeof network.mode } })}
+          >
+            <option value="system">跟随系统代理 / VPN</option>
+            <option value="fixed">自定义 HTTP / SOCKS 代理</option>
+            <option value="direct">不使用代理</option>
+          </select>
+        </div>
+        {network.mode === 'fixed' && (
+          <>
+            <div className="field">
+              <span className="field-label">代理地址</span>
+              <input
+                className="input"
+                value={proxyRules}
+                placeholder="http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
+                onChange={(e) => setProxyRules(e.target.value)}
+                onBlur={() => void saveSettings({ network: { ...network, proxyRules: proxyRules.trim() } })}
+              />
+            </div>
+            <div className="field">
+              <span className="field-label">不走代理</span>
+              <input
+                className="input"
+                value={proxyBypassRules}
+                placeholder="<local>"
+                onChange={(e) => setProxyBypassRules(e.target.value)}
+                onBlur={() => void saveSettings({ network: { ...network, proxyBypassRules: proxyBypassRules.trim() || '<local>' } })}
+              />
+            </div>
+          </>
+        )}
+        <div className="field-hint">
+          网页抓取、模型对话、工具调用和识图会统一使用这里的网络设置。Clash、V2Ray 等开启系统代理时选“跟随系统”；仅开启本地代理端口时选“自定义代理”。
+        </div>
       </div>
 
       {/* Agent 能力 */}
@@ -588,26 +652,23 @@ function GeneralSection(): React.ReactElement {
    ================================================================== */
 
 function AiSection(): React.ReactElement {
-  const { settings, saveSettings } = useApp()
+  const { settings, saveSettings, models, activeModelId, refreshModels, probeModel } = useApp()
   const [testing, setTesting] = useState<null | { ok: boolean; msg: string }>(null)
   const [draft, setDraft] = useState<LlmDraft | null>(null)
   const [keyMsg, setKeyMsg] = useState('')
   const lastSavedKey = useRef('')
+  const draftModelId = useRef('')
 
   const llm = settings ? settings.llm : null
+  const activeModel = models.find((m) => m.id === activeModelId) ?? null
   useEffect(() => {
-    if (llm && !draft) {
-      setDraft(llm)
-      lastSavedKey.current = llm.apiKey
-    }
-  }, [llm, draft])
-
-  useEffect(() => {
-    if (!llm) return
-    if (llm.apiKey === lastSavedKey.current) return
-    lastSavedKey.current = llm.apiKey
-    setDraft((prev) => (prev ? { ...prev, apiKey: llm.apiKey } : prev))
-  }, [llm])
+    if (!llm || !activeModel) return
+    if (draftModelId.current === activeModel.id) return
+    draftModelId.current = activeModel.id
+    const key = activeModel.apiKey ?? ''
+    lastSavedKey.current = key
+    setDraft({ ...llm, baseUrl: activeModel.baseUrl, model: activeModel.model, apiKey: key })
+  }, [llm, activeModel])
 
   if (!settings || !llm) return <></>
   const d = draft ?? llm
@@ -616,7 +677,16 @@ function AiSection(): React.ReactElement {
 
   const commit = async (next?: LlmDraft): Promise<void> => {
     const target = next ?? d
-    await saveSettings({ llm: target })
+    if (activeModel?.kind === 'api') {
+      const updated = await window.aimis.model.update({
+        id: activeModel.id,
+        patch: { baseUrl: target.baseUrl.trim(), model: target.model.trim(), apiKey: target.apiKey.trim() }
+      })
+      if (!updated.ok) throw new Error(updated.error || '保存当前模型配置失败')
+      await refreshModels()
+    }
+    // Keep the legacy LLM fields synchronized for upgrades and non-selector callers.
+    await saveSettings({ llm: { ...target, baseUrl: target.baseUrl.trim(), model: target.model.trim(), apiKey: target.apiKey.trim() } })
     lastSavedKey.current = target.apiKey
   }
 
@@ -642,8 +712,8 @@ function AiSection(): React.ReactElement {
     await commit(next)
     setTesting(
       provider === 'offline'
-        ? { ok: true, msg: '已切换到网络接口，填好 API Key 后生效' }
-        : { ok: true, msg: '已切换到本地引擎，立即生效' }
+        ? { ok: true, msg: '已切换到本地引擎' }
+        : { ok: true, msg: '已切换到网络接口，当前模型配置将用于下一条消息' }
     )
   }
 
@@ -654,14 +724,13 @@ function AiSection(): React.ReactElement {
       setTesting({ ok: false, msg: '还没填 API Key —— 当前会继续使用离线引擎' })
       return
     }
+    if (!activeModel) {
+      setTesting({ ok: false, msg: '没有选中的模型' })
+      return
+    }
     try {
-      const res = await fetch(d.baseUrl.replace(/\/+$/, '') + '/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + d.apiKey },
-        body: JSON.stringify({ model: d.model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 8 })
-      })
-      if (res.ok) setTesting({ ok: true, msg: '连通正常，已接入真实模型' })
-      else setTesting({ ok: false, msg: '返回 ' + res.status + '：' + (await res.text()).slice(0, 160) })
+      const res = await probeModel(activeModel.id, d.baseUrl.trim(), d.apiKey.trim())
+      setTesting({ ok: res.ok, msg: res.message })
     } catch (err) {
       setTesting({ ok: false, msg: err instanceof Error ? err.message : String(err) })
     }
@@ -669,10 +738,10 @@ function AiSection(): React.ReactElement {
 
   const effective =
     llm.provider === 'offline'
-      ? '网络接口'
-      : llm.apiKey.trim()
-        ? '本地引擎 · ' + llm.model
-        : '本地引擎（未填 Key，实际走离线引擎）'
+      ? '本地引擎'
+      : activeModel && d.apiKey.trim()
+        ? `${activeModel.name} · ${d.model}`
+        : `${activeModel?.name ?? '网络模型'}（未配置密钥）`
 
   return (
     <>
@@ -746,14 +815,16 @@ function AiSection(): React.ReactElement {
                     className="btn sm danger"
                     data-testid="clear-api-key"
                     onClick={() => void clearKey()}
-                    title="清空密钥，断开与 API 模型的连接"
+                    aria-label="清空密钥，断开与 API 模型的连接"
                   >
                     清空密钥
                   </button>
                 )}
                 {keyMsg && <span style={{ fontSize: 12, color: 'var(--ok)' }}>{keyMsg}</span>}
               </div>
-              <div className="field-hint">API 联网模型共用这个密钥。</div>
+              <div className="field-hint">
+                当前配置：{activeModel?.name ?? '未选择模型'}。同一厂商的内置模型会共用这个 API Key，不会发送给其他厂商。
+              </div>
             </div>
             <div className="field">
               <span className="field-label">模型</span>

@@ -15,7 +15,6 @@ import { resolveSafePath, displayPath, getWorkspaceRoot } from '../safeFs'
 import { documentVersion } from '../documents'
 import { createDocx, replaceDocx, writeSheet } from '../officeWork'
 import { ensureParentDir, atomicWrite } from '../safeFs'
-import { securityState } from '../workspaceSecurity'
 import { getMachinePermission } from '../permission'
 
 /**
@@ -282,7 +281,7 @@ async function saveOffice(
 
   const result = await build(original)
 
-  if (workspace !== getWorkspaceRoot() || tier !== getMachinePermission() || (tier !== 'full' && !securityState(workspace).trusted)) throw new Error('操作期间权限已变更')
+  if (workspace !== getWorkspaceRoot() || tier !== getMachinePermission()) throw new Error('操作期间权限已变更')
   if (
     resolveSafePath(String(args.path ?? ''), { forWrite: true }) !== path ||
     (existsSync(path) ? documentVersion(readFileSync(path)) : undefined) !== version

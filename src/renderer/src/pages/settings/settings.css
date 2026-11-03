@@ -1,0 +1,46 @@
+.settings-notice {
+  margin: 0 36px 14px;
+  padding: 10px 16px;
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  background: var(--glass);
+  color: var(--text-4);
+  font-size: 11.5px;
+  line-height: 1.8;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.set-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  margin-bottom: 2px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+  transition: all 180ms var(--ease);
+}
+
+.set-item:hover { background: var(--glass-hover); color: var(--text-1); }
+.set-item.active { background: var(--accent-grad); color: #fff; box-shadow: var(--glow); }
+.set-icon { width: 15px; font-size: 12px; text-align: center; opacity: 0.9; }
+.sec-title { margin-bottom: 6px; font-size: 22px; font-weight: 600; }
+.sec-desc { margin-bottom: 22px; color: var(--text-3); font-size: 12.5px; }
+
+.pick-card {
+  padding: 12px 14px;
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  background: var(--glass);
+  text-align: left;
+  transition: all 200ms var(--ease);
+}
+
+.pick-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.pick-card.on { border-color: transparent; background: var(--accent-grad); color: #fff; box-shadow: var(--glow); }
+.pick-card.on .pick-desc { color: rgba(255, 255, 255, 0.82); }
+.pick-desc { color: var(--text-3); font-size: 11px; line-height: 1.5; }

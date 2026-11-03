@@ -84,7 +84,7 @@ process.env.SMOKE_DATA_DIR = DATA
 
 const mod = require(join(OUT, 'bundle.cjs'))
 
-   否则默认 view 档会拦截写/执行类工具，测试无法覆盖这些路径 */
+/* 测试里统一给最高权限：否则默认 view 档会拦截写/执行类工具，测试无法覆盖这些路径 */
 try {
   mod.setMachinePermission?.('full')
 } catch {

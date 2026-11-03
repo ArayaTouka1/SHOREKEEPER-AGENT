@@ -27,10 +27,9 @@ const FALLBACK_LABEL: Record<MachinePermission, string> = {
   full: '完全权限'
 }
 
-export default function PermissionBadge(props: { compact?: boolean } = {}): React.ReactElement {
+export default function PermissionBadge(props: { compact?: boolean; placement?: 'top' | 'bottom' } = {}): React.ReactElement {
   const { settings, saveSettings, workspace } = useApp()
-  const [trusted, setTrusted] = useState(false)
-  const { compact = false } = props
+  const { compact = false, placement = 'top' } = props
   const [state, setState] = useState<MachinePermissionState | null>(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -51,7 +50,6 @@ export default function PermissionBadge(props: { compact?: boolean } = {}): Reac
 
   useEffect(() => {
     void load()
-    void window.aimis.agent.security().then(r => { if (r.ok && r.data) setTrusted(r.data.trusted) })
   }, [load, settings, workspace])
 
   useEffect(() => {
@@ -107,18 +105,17 @@ export default function PermissionBadge(props: { compact?: boolean } = {}): Reac
   }
 
   return (
-    <div ref={boxRef} style={{ position: 'relative' }}>
+    <div ref={boxRef} className={compact ? undefined : 'chat-composer-action'} style={{ position: 'relative' }}>
       <button
-        className="btn sm"
+        className={`btn sm${compact ? '' : ' chat-composer-control chat-composer-permission-control'}`}
         data-testid="permission-badge"
         data-tier={tier}
         disabled={busy}
-        title={state?.hint ?? label}
         onClick={() => setOpen((v) => !v)}
         style={{
           gap: 5,
           color: visual.color,
-          background: visual.bg,
+          background: compact ? visual.bg : 'var(--glass)',
           borderColor: 'var(--stroke)',
           maxWidth: compact ? 132 : 180
         }}
@@ -134,7 +131,9 @@ export default function PermissionBadge(props: { compact?: boolean } = {}): Reac
         <div
           className="perm-pop"
           data-testid="permission-popover"
-          style={{ left: 'auto', right: 0 }}
+          style={placement === 'bottom'
+            ? { left: 'auto', right: 0, top: 'calc(100% + 8px)', bottom: 'auto' }
+            : { left: 'auto', right: 0, top: 'auto', bottom: 'calc(100% + 8px)' }}
         >
           <div className="perm-title">本机权限</div>
           {(state?.options && state.options.length ? state.options : FALLBACK_PERMISSION_OPTIONS).map((opt) => {
@@ -156,18 +155,8 @@ export default function PermissionBadge(props: { compact?: boolean } = {}): Reac
               </button>
             )
           })}
-          <label style={{ display: 'flex', gap: 8, padding: 10, alignItems: 'center', fontSize: 12 }}>
-            <input type="checkbox" aria-label="信任此工作区" checked={trusted} disabled={busy || tier === 'full'} onChange={async e => {
-              const next = e.target.checked
-              const result = await window.aimis.agent.trust(next)
-              if (!result.ok) { setToast(result.error || '设置失败'); return }
-              setTrusted(next)
-              if (next && tier === 'view') await applyTier('workspace')
-              if (!next && tier === 'workspace') await applyTier('view')
-            }} />信任此工作区
-          </label>
           <div className="perm-foot">
-            完全权限下操作直接执行；工作区修改需要确认。
+            权限档位是唯一控制项；允许范围内的操作会直接执行，不再逐次询问。
           </div>
         </div>
       )}

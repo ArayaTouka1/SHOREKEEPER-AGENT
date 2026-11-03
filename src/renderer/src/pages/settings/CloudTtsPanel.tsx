@@ -341,13 +341,27 @@ export default function CloudTtsPanel(): React.ReactElement {
             data-testid="tts-disconnect"
             disabled={busy}
             onClick={() => void disconnect()}
-            title="清空密钥并断开连接"
+            aria-label="清空密钥并断开连接"
           >
             断开连接
           </button>
         )}
         {testing && (
-          <span style={{ fontSize: 12, color: testing.ok ? 'var(--ok)' : 'var(--err)' }}>{testing.message}</span>
+          // 错误信息可能多行（含音色列表探测明细），用块级 pre-wrap 完整展示
+          <div
+            data-testid="tts-test-result"
+            style={{
+              fontSize: 12,
+              lineHeight: 1.6,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              color: testing.ok ? 'var(--ok)' : 'var(--err)',
+              flexBasis: '100%',
+              marginTop: 6
+            }}
+          >
+            {testing.message}
+          </div>
         )}
       </div>
 
@@ -527,7 +541,6 @@ function VoiceLibrary({
                     data-inworld-voice={x.voiceId}
                     className={`pick-card ${currentVoiceId === x.voiceId ? 'on' : ''}`}
                     onClick={() => onPick(x.voiceId)}
-                    title={x.voiceId}
                   >
                     <div className="truncate" style={{ fontSize: 12.5 }}>
                       {x.displayName}

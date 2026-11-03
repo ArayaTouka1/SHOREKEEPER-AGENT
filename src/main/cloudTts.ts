@@ -108,6 +108,29 @@ function joinUrl(base: string, path: string): string {
   return base.replace(/\/+$/, '') + '/' + path.replace(/^\/+/, '')
 }
 
+/**
+ * 云语音请求统一入口 —— 带超时。
+ *
+ * 之前所有 fetch 都没有超时：网络不通 / 服务商无响应时界面会一直转圈，
+ * 用户感知就是「连不上」且拿不到任何原因。现在统一 20 秒超时，
+ * 并把网络层错误转成可读中文。
+ */
+async function fetchTts(url: string, init: RequestInit = {}, timeoutMs = 20000): Promise<Response> {
+  const ctl = new AbortController()
+  const timer = setTimeout(() => ctl.abort(), timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal: ctl.signal })
+  } catch (err) {
+    if (ctl.signal.aborted) {
+      throw new Error(`请求超时（${Math.round(timeoutMs / 1000)} 秒无响应）：${url}`)
+    }
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`网络请求失败：${msg}（地址 ${url}）`)
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function authHeaders(cfg: CloudTtsConfig): Record<string, string> {
   const key = (cfg.apiKey ?? '').trim()
   if (!key || cfg.authMode === 'none') return {}
@@ -116,22 +139,45 @@ function authHeaders(cfg: CloudTtsConfig): Record<string, string> {
 }
 
 /**
+ * 拉取 OpenAI 兼容服务的音色列表。
+ *
+ * 不同实现的路径差异很大（/audio/voices、/voices、/models…），
+ * 因此逐个候选试；全部失败时把每次的真实原因记进 lastVoiceListErrors，
+ * 供「测试连接」给出可诊断的提示（而不是静默返回空列表）。
  */
+let lastVoiceListErrors: string[] = []
+
+export function voiceListErrors(): string[] {
+  return lastVoiceListErrors
+}
+
 export async function listCloudVoices(cfg: CloudTtsConfig): Promise<CloudVoice[]> {
   if (cfg.provider === 'inworld') return listInworldVoices(cfg)
 
+  lastVoiceListErrors = []
   const base = (cfg.baseUrl ?? '').trim()
-  if (!base) return []
+  if (!base) {
+    lastVoiceListErrors.push('未填写接口地址（Base URL）')
+    return []
+  }
   const candidates = cfg.voicesPath?.trim()
     ? [cfg.voicesPath.trim()]
     : ['audio/voices', 'voices', 'models']
 
   for (const path of candidates) {
+    const url = joinUrl(base, path)
     try {
-      const res = await fetch(joinUrl(base, path), { headers: authHeaders(cfg) })
-      if (!res.ok) continue
+      const res = await fetchTts(url, { headers: authHeaders(cfg) }, 12000)
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        lastVoiceListErrors.push(`${path} → HTTP ${res.status}${body ? '：' + body.slice(0, 120) : ''}`)
+        continue
+      }
       const json: any = await res.json().catch(() => null)
-      if (!json) continue
+      if (!json) {
+        lastVoiceListErrors.push(`${path} → 返回不是 JSON`)
+        continue
+      }
 
       const raw: any[] = Array.isArray(json) ? json : (json.data ?? json.voices ?? [])
       const list: CloudVoice[] = []
@@ -149,7 +195,9 @@ export async function listCloudVoices(cfg: CloudTtsConfig): Promise<CloudVoice[]
         })
       }
       if (list.length) return list
-    } catch {
+      lastVoiceListErrors.push(`${path} → 列表为空`)
+    } catch (err) {
+      lastVoiceListErrors.push(`${path} → ${err instanceof Error ? err.message : String(err)}`)
     }
   }
   return []
@@ -165,7 +213,7 @@ async function listInworldVoices(cfg: CloudTtsConfig): Promise<CloudVoice[]> {
 
   for (let page = 0; page < 10; page++) {
     const url = pageToken ? `${endpoint}?pageToken=${encodeURIComponent(pageToken)}` : endpoint
-    const res = await fetch(url, { headers: authHeaders(cfg) })
+    const res = await fetchTts(url, { headers: authHeaders(cfg) }, 15000)
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       throw new Error(`拉取音色失败 ${res.status}：${body.slice(0, 200)}`)
@@ -250,11 +298,11 @@ async function synthesizeInworld(opts: SynthesizeOptions): Promise<SynthesizeRes
     payload.pitch = Math.max(-12, Math.min(12, opts.pitch / 4))
   }
 
-  const res = await fetch(joinUrl(base, 'tts/v1/voice'), {
+  const res = await fetchTts(joinUrl(base, 'tts/v1/voice'), {
     method: 'POST',
     headers: { ...authHeaders(cfg), 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify(payload)
-  })
+  }, 60000)
 
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -293,11 +341,11 @@ async function synthesizeOpenAICompatible(opts: SynthesizeOptions): Promise<Synt
     payload.speed = Math.min(4, Math.max(0.25, opts.rate))
   }
 
-  const res = await fetch(joinUrl(base, path), {
+  const res = await fetchTts(joinUrl(base, path), {
     method: 'POST',
     headers: { ...authHeaders(cfg), 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify(payload)
-  })
+  }, 60000)
 
   if (!res.ok) {
     const body = await res.text().catch(() => '')
@@ -328,6 +376,8 @@ export interface TestResult {
 
 export async function testConnection(cfg: CloudTtsConfig): Promise<TestResult> {
   if (cfg.provider === 'inworld') {
+    const key = (cfg.apiKey ?? '').trim()
+    if (!key) return { ok: false, message: '没有配置 API Key（Inworld 需要 Basic 认证串）', voices: 0 }
     try {
       const voices = await listInworldVoices(cfg)
       return { ok: true, message: `连通正常，发现 ${voices.length} 个音色`, voices: voices.length }
@@ -339,27 +389,40 @@ export async function testConnection(cfg: CloudTtsConfig): Promise<TestResult> {
   const base = (cfg.baseUrl ?? '').trim()
   if (!base) return { ok: false, message: '请先填写接口地址（Base URL）', voices: 0 }
 
+  // 1) 先试拉音色列表（能拿到就直接成功）
+  let voices: CloudVoice[] = []
   try {
-    const voices = await listCloudVoices(cfg)
-    if (voices.length) {
-      return { ok: true, message: `连通正常，发现 ${voices.length} 个音色`, voices: voices.length }
-    }
+    voices = await listCloudVoices(cfg)
   } catch {
+    /* 错误已记录在 voiceListErrors() */
+  }
+  if (voices.length) {
+    return { ok: true, message: `连通正常，发现 ${voices.length} 个音色`, voices: voices.length }
   }
 
-  if (!cfg.model || !cfg.voiceId) {
+  const listErrs = voiceListErrors()
+
+  // 2) 没有音色列表时，用真实合成判定（这才是权威结论）
+  const model = (cfg.model ?? '').trim()
+  const voiceId = (cfg.voiceId ?? '').trim()
+
+  if (!model || !voiceId) {
+    // 缺参数无法实测：把音色列表探测的真实原因告诉用户，不要假装成功
+    const detail = listErrs.length ? '\n音色列表探测：\n  - ' + listErrs.join('\n  - ') : ''
     return {
-      ok: true,
-      message: '端点可达（未取到音色列表，请手填模型与音色名）',
+      ok: false,
+      message:
+        '未能自动确认连通性。请补全「模型」与「音色名」后重试（这两个字段是合成必需的，接口通常不提供列表）。' + detail,
       voices: 0
     }
   }
 
   try {
-    await synthesize({ config: cfg, text: '测试', voiceId: cfg.voiceId, modelId: cfg.model })
+    await synthesize({ config: cfg, text: '测试', voiceId, modelId: model })
     return { ok: true, message: '连通正常，合成测试成功', voices: 0 }
   } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : String(err), voices: 0 }
+    const detail = listErrs.length ? '\n音色列表探测：\n  - ' + listErrs.join('\n  - ') : ''
+    return { ok: false, message: (err instanceof Error ? err.message : String(err)) + detail, voices: 0 }
   }
 }
 

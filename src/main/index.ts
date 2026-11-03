@@ -1,15 +1,20 @@
-import { requestOperationApproval, pendingOperationApprovals, decideOperationApproval } from './operationApproval'
-import { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu, nativeImage } from 'electron'
-import { join, extname } from 'node:path'
+import { app, BrowserWindow, ipcMain, shell, dialog, Tray, Menu, nativeImage, session } from 'electron'
+import { autoUpdater } from 'electron-updater'
+import { ConversationTurns } from './conversationTurns'
+import { join, extname, dirname, basename, sep, resolve as resolvePath } from 'node:path'
 import { splashMediaStatus, pickSplashMedia, resetSplashMedia } from './splashMedia'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { recordInteraction, relationshipSnapshot, resetRelationship } from './characterRuntime'
+import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import JSZip from 'jszip'
+import { recordInteraction, relationshipSnapshot, resetRelationship, stageIndex } from './characterRuntime'
 import { findOpusByLine, opusToFileUrl, hasOpus, opusDir } from './opus'
 import { CH } from '../shared/channels'
+import { SHOREKEEPER_CALL_MODEL } from '../shared/callModels'
 import type {
   AppBootstrap,
   AppSettings,
   Attachment,
+  ChatMessage,
   ChatSendChunk,
   Character,
   MemoryItem,
@@ -27,11 +32,15 @@ import { characterRepo, makeAvatars } from './character'
 import { chatRepo } from './chat'
 import { memoryRepo, looksMemorable, purgeSeedMemories } from './memory'
 import { settingsRepo } from './settings'
+import { applyNetworkConfig } from './network'
+import { indexTtsStatus, installIndexTts, listReferenceVoices, synthesizeIndexTts } from './indexTts'
+import { probeGptSovits, synthesizeGptSovits } from './gptSovits'
+import { synthesizeLocalHttpTts } from './localHttpTts'
 import { themeRepo } from './theme'
 import { collectHardware } from './hardware'
 import { TOOL_SPECS, launchApp, closeApp, listRunningApps } from './apps'
 import { detectIntent, makeToolCall, runTool, offlineNarrate, toolSpec } from './agent'
-import { buildSystemPrompt, streamOpenAICompatible } from './llm'
+import { buildSystemPrompt, formatCasualSpeech, streamOpenAICompatible } from './llm'
 import { ensureDataDir } from './store'
 import { VOICE_PRESETS, listVoiceAssets, resolveVoicePath, importVoiceFile, deleteVoiceFile } from './voice'
 import {
@@ -107,17 +116,75 @@ import {
 import { pickWorldBook, renderWorldBook } from './characterCard'
 import { buildPersonaCard, classifyIntent, personaReply, violatesPersona } from './personaCard'
 import { TRAY_ICON_DATA_URL } from './trayIcon'
-import { installApprovalPrompt, securityState, setWorkspaceTrust, putCommandRule, removeCommandRule, clearApprovals } from './workspaceSecurity'
+import { securityState, setWorkspaceTrust, putCommandRule, removeCommandRule, clearApprovals } from './workspaceSecurity'
 import { openDocument } from './documents'
 import { detectFileIntent } from './fileIntent'
 import { modelRoute } from './modelRouting'
 
 const isDev = !!process.env['ELECTRON_RENDERER_URL']
 let mainWindow: BrowserWindow | null = null
+let callWindow: BrowserWindow | null = null
+let renderPreviewWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 /**
  */
 let isQuitting = false
+
+type AppUpdateState = {
+  status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'not-available' | 'error'
+  message: string
+  version?: string
+  percent?: number
+}
+let appUpdateState: AppUpdateState = { status: 'idle', message: '尚未检查更新' }
+
+function setAppUpdateState(state: AppUpdateState): void {
+  appUpdateState = state
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send(CH.appUpdateState, state)
+}
+
+function getAppUpdateErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error)
+  if (/latest\.yml.*(?:404|not found)|(?:404|not found).*latest\.yml/i.test(message)) {
+    return '更新清单不存在（GitHub Release 未发布或缺少 latest.yml），请稍后重试或前往项目发布页手动下载。'
+  }
+  if (/\b404\b|not found/i.test(message)) {
+    return '更新资源不存在，请稍后重试或前往项目发布页手动下载。'
+  }
+  if (/\b401\b|\b403\b|unauthorized|forbidden|authentication token/i.test(message)) {
+    return '无法访问更新资源，请检查网络或发布权限。'
+  }
+  if (/network|timeout|ENOTFOUND|ECONN|ETIMEDOUT/i.test(message)) {
+    return '连接更新服务器失败，请检查网络后重试。'
+  }
+  return '检查更新失败，请稍后重试或前往项目发布页手动下载。'
+}
+
+async function checkForAppUpdates(): Promise<void> {
+  if (!app.isPackaged) {
+    setAppUpdateState({ status: 'not-available', message: '开发环境不检查更新' })
+    return
+  }
+  setAppUpdateState({ status: 'checking', message: '正在检查更新…' })
+  await autoUpdater.checkForUpdates()
+}
+
+function setupAppUpdater(): void {
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.on('checking-for-update', () => setAppUpdateState({ status: 'checking', message: '正在检查更新…' }))
+  autoUpdater.on('update-available', (info) => setAppUpdateState({
+    status: 'available', message: `发现新版本 ${info.version}，正在后台下载…`, version: info.version
+  }))
+  autoUpdater.on('download-progress', (progress) => setAppUpdateState({
+    status: 'downloading', message: `正在下载更新 ${Math.floor(progress.percent)}%`, percent: progress.percent
+  }))
+  autoUpdater.on('update-downloaded', (info) => setAppUpdateState({
+    status: 'ready', message: `新版本 ${info.version} 已就绪，重启后完成更新。`, version: info.version
+  }))
+  autoUpdater.on('update-not-available', () => setAppUpdateState({ status: 'not-available', message: '当前已是最新版本' }))
+  autoUpdater.on('error', (error) => setAppUpdateState({ status: 'error', message: getAppUpdateErrorMessage(error) }))
+}
 
 /**
  */
@@ -127,6 +194,7 @@ let lastBootReport: BootReport | null = null
  * ------------------------------------------------------------------ */
 
 function createWindow(): void {
+  if (process.platform === 'win32') app.setAppUserModelId('com.shorekeeper.agent')
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -138,7 +206,7 @@ function createWindow(): void {
     title: '守岸人陪伴终端',
     backgroundColor: '#FDF7FB',
     autoHideMenuBar: true,
-    icon: app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(app.getAppPath(), '../icon.png'),
+    icon: app.isPackaged ? join(process.resourcesPath, 'app.ico') : join(app.getAppPath(), '../build/icon.ico'),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -209,7 +277,7 @@ function quitApp(): void {
 function createTray(): void {
   if (tray) return
   try {
-    const icon = nativeImage.createFromPath(app.isPackaged ? join(process.resourcesPath, 'icon.png') : join(app.getAppPath(), '../icon.png'))
+    const icon = nativeImage.createFromDataURL(TRAY_ICON_DATA_URL)
     if (icon.isEmpty()) {
       console.error('[tray] 图标解码为空，托盘可能不可见')
     }
@@ -331,10 +399,402 @@ interface PendingApproval {
 }
 
 const pendingApprovals = new Map<string, PendingApproval>()
-const aborters = new Map<string, AbortController>()
+const conversationTurns = new ConversationTurns()
+const callConversationIds = new Set<string>()
+const activeCallConversationIds = new Set<string>()
+const inFlightCallConversationIds = new Map<string, symbol>()
+const deferredCallReplies = new Map<string, string>()
+let callMainConversationId: string | null = null
+let callConversationId: string | null = null
+let callSeedMessageCount = 0
+let callStartedAt = 0
+let callCharacterId: string | null = null
+type CallMode = 'voice' | 'video'
+let pendingCharacterCall: { conversationId: string; characterId: string; mode: CallMode } | null = null
+type CallInitiator = 'user' | 'character'
+type CallPhase = 'ringing' | 'active' | 'rejected'
+let callInitiator: CallInitiator = 'user'
+let callPhase: CallPhase = 'active'
+let callMode: CallMode = 'video'
 
-function send(chunk: ChatSendChunk): void {
-  mainWindow?.webContents.send(CH.chatStream, chunk)
+function send(chunk: ChatSendChunk, conversationId?: string): void {
+  const payload = conversationId ? { ...chunk, conversationId } : chunk
+  if (conversationId && callConversationIds.has(conversationId)) {
+    callWindow?.webContents.send(CH.chatStream, payload)
+    return
+  }
+  mainWindow?.webContents.send(CH.chatStream, payload)
+}
+
+function pickCallLine(lines: string[]): string {
+  return formatCasualSpeech(lines[Math.floor(Math.random() * lines.length)])
+}
+
+function formatCallDuration(durationSeconds: number): string {
+  const hours = Math.floor(durationSeconds / 3600)
+  const minutes = Math.floor((durationSeconds % 3600) / 60)
+  const seconds = durationSeconds % 60
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+function callGreeting(character: Character): { text: string; opusUrl: string | null } {
+  const greeting = relationshipSnapshot(character, new Date(), true)
+  const opus = findOpusByLine(character.id, greeting.greetingRaw)
+  return { text: formatCasualSpeech(greeting.greeting), opusUrl: opus ? opusToFileUrl(opus.path) : null }
+}
+
+async function callFarewell(character: Character, durationSeconds: number, conversationId: string, callHistory: ChatMessage[]): Promise<string> {
+  const settings = settingsRepo.get()
+  const model = modelRepo.active()
+  if (isModelUsable(model, settings)) {
+    try {
+      const persona = characterRepo.personaOf(character)
+      const memories = memoryRepo.search('语音通话结束', character.id, settings.chat.memoryTopK, conversationId)
+      const relationship = relationshipSnapshot(character)
+      const system = await buildSystemPrompt({
+        character,
+        persona,
+        memories,
+        settings,
+        model,
+        internalPrompt: [
+          internalPromptFor(character),
+          `当前语音通话已经结束。请完全依照你的身份、人设、说话习惯和当前关系阶段，为这次通话说一句自然的结束语。通话时长：${formatCallDuration(durationSeconds)}。时长和关系程度只用于调整语气与情绪，不要提及数值、阶段或规则。不要套用通用客服话术，不要虚构通话中没有发生的具体事情，也不要复述用户说过的话。只输出给用户听的结束语。`
+        ].filter(Boolean).join('\n\n')
+      })
+      let full = ''
+      let failed = false
+      await streamOpenAICompatible({
+        settings,
+        system,
+        history: callHistory.slice(-24),
+        userText: `通话刚刚结束。通话时长为${formatCallDuration(durationSeconds)}，当前关系阶段是${relationship.stage}。请根据你自己的性格自然道别。`,
+        signal: new AbortController().signal,
+        override: modelOverride(model, settings),
+        cb: {
+          onDelta: (delta) => { full += delta },
+          onDone: (text) => { if (text) full = text },
+          onError: () => { failed = true }
+        }
+      })
+      if (!failed && full.trim()) return formatCasualSpeech(full.trim())
+    } catch (error) {
+      console.warn('[call] 生成符合人设的结束语失败：', error)
+    }
+  }
+  const persona = characterRepo.personaOf(character)
+  const card = buildPersonaCard(character, persona)
+  return formatCasualSpeech(personaReply({
+    card,
+    intent: 'farewell',
+    userText: `结束一通${durationSeconds < 30 ? '很短的' : durationSeconds > 180 ? '聊了很久的' : ''}语音通话`,
+    memories: []
+  }))
+}
+
+function rejectedCallReply(score: number, name: string): string {
+  const stage = stageIndex(score)
+  if (stage < 1) return pickCallLine(['没关系，你现在不方便也正常。我先不打扰了。', `知道了，${name}也不是一定要现在接。下次再说吧。`])
+  if (stage < 2) return pickCallLine(['好吧，看来你现在不方便。等有空再聊。', '没关系，我晚点再找你。'])
+  if (stage < 4) return pickCallLine(['有点遗憾，不过没关系，等你有空再接我吧。', '看来我来得不是时候。那就下次再聊。'])
+  return pickCallLine(['咦，这就挂断啦？好吧，等你有空时再接我，好吗？', '被挂断还是有点失落……不过我会等你有空再打来的。'])
+}
+
+function isCallRequest(text: string, conversationId?: string): boolean {
+  if (/(别|不要|不用|不想|拒绝|不用给我|别给我)/.test(text)) return false
+  if (/(?:给我|和我|跟我|我们).{0,12}(?:打视频电话|视频通话|视频聊天)/.test(text)) return true
+  if (/(?:打给我|拨给我|打过来|拨过来|给我来电话|给我打|现在有空了|现在方便了)/.test(text) && /(?:打给我|拨给我|打过来|拨过来|给我来电话|给我打|打电话|电话|通话|有空|方便)/.test(text)) return true
+  if (/(?:你.{0,16}(?:给我|打给我|拨给我|和我|跟我|我们).{0,12}(?:电话|通话|call|phone)|(?:和我|跟我|我们).{0,8}(?:打电话|打个电话|通话)|给我.{0,10}(?:打电话|来电话|通话)|(?:打电话|打个电话|拨电话|通话).{0,10}(?:给我|和我|跟我)|我想.{0,12}(?:你|和你|跟你).{0,10}(?:打电话|通话)|call\s+me|phone\s+me)/i.test(text)) return true
+  if (!conversationId || !/(有空|方便|现在可以|现在行|可以打|打吧|拨吧)/.test(text)) return false
+  const earlierOffer = chatRepo.recent(conversationId, 8)
+    .filter((message) => message.role === 'character')
+    .slice(-3)
+    .some((message) => /(?:我(?:(?:晚点|一会儿|等下|待会儿)?再(?:打|拨|找你)|晚点再找你)|有空(?:就|了)?(?:给你|我就)|等你(?:有空|方便)|我再(?:打|拨)过去|打给你|拨给你)/.test(message.text))
+  return earlierOffer
+}
+
+function clearlyAcceptsCall(text: string): boolean {
+  if (/(不行|不能|不可以|不方便|不太方便|没空|不想|不要|没法|改天|下次|以后|考虑|再看看|也许|可能|暂时不|先不了|拒绝)/.test(text)) return false
+  return /(?:可以(?:呀|啊|的|了|\s*[，,。.!！？?]|$)|可以.{0,12}(?:现在|马上|这就|给你|打给你|拨给你|给你打|打电话|通话)|好(?:呀|啊|[，,])|当然|愿意|没问题|现在就|马上|这就|我.{0,8}(?:打|拨).{0,8}(?:给你|电话|过去|过来)|(?:再)?(?:打|拨).{0,6}(?:给你|过去|过来)|打给你|拨给你|给你打|calling you|call you)/i.test(text)
+}
+
+function callRequestPrompt(userText: string, conversationId?: string): string {
+  return isCallRequest(userText, conversationId)
+    ? `用户正在询问你是否愿意给他打${/视频|视讯|video/i.test(userText) ? '视频' : '语音'}电话。本应用确实支持角色主动呼叫，不能因为“我无法打电话/我做不到”这样的技术限制而拒绝。按当前关系和你的性格自然决定是否接受；若接受，请明确说出“好，我现在打给你”一类清楚的答应，让应用随后向用户发起来电；若你的人设和关系使你不愿意，则以角色自己的理由自然婉拒。不要声称已经拨出电话，除非你明确接受。`
+    : ''
+}
+
+function maybeRingCharacterCall(conversationId: string, character: Character, userText: string, reply: string): void {
+  if (!isCallRequest(userText, conversationId) || !clearlyAcceptsCall(reply)) return
+  if (callWindow && !callWindow.isDestroyed()) return
+  pendingCharacterCall = { conversationId, characterId: character.id, mode: /视频|视讯|video/i.test(userText) ? 'video' : 'voice' }
+}
+
+function appendRejectedCall(conversationId: string): void {
+  const character = characterRepo.list().find((item) => item.id === callCharacterId) ?? characterRepo.active()
+  if (!chatRepo.conversations().some((item) => item.id === conversationId && item.characterId === character.id)) return
+  chatRepo.append({ conversationId, role: 'user', text: `我挂断了${character.name}的来电` })
+  const text = rejectedCallReply(relationshipSnapshot(character).score, character.name)
+  deferredCallReplies.set(conversationId, text)
+  send({ type: 'done', text, conversationId, deferTextUntilSpeechFinished: true, forceSpeak: true }, conversationId)
+}
+
+function openCallWindow(conversationId?: string, initiator: CallInitiator = 'user', phase: CallPhase = 'active', mode: CallMode = 'video'): boolean {
+  if (callWindow && !callWindow.isDestroyed()) {
+    callWindow.show()
+    callWindow.focus()
+    return true
+  }
+  callMainConversationId = conversationId ?? null
+  callCharacterId = characterRepo.active().id
+  callInitiator = initiator
+  callPhase = phase
+  callMode = mode
+  callStartedAt = phase === 'active' ? Date.now() : 0
+  callWindow = new BrowserWindow({
+    width: mode === 'voice' ? 420 : 480,
+    height: mode === 'voice' ? 620 : 720,
+    minWidth: 360,
+    minHeight: 520,
+    frame: false,
+    resizable: true,
+    title: mode === 'voice' ? '角色语音通话' : '角色视频通话',
+    backgroundColor: '#101927',
+    autoHideMenuBar: true,
+    icon: app.isPackaged ? join(process.resourcesPath, 'app.ico') : join(app.getAppPath(), '../build/icon.ico'),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false
+    }
+  })
+  mainWindow?.webContents.send('call:active', true)
+  callWindow.on('closed', () => {
+    const endedInitiator = callInitiator
+    const endedPhase = callPhase
+    const durationMs = callStartedAt ? Math.max(0, Date.now() - callStartedAt) : 0
+    const conversationId = callMainConversationId
+    const callHistory = callConversationId ? chatRepo.messages(callConversationId) : []
+    const callOnlyHistory = callHistory.slice(callSeedMessageCount).filter((message) => message.role === 'user' || message.role === 'character')
+    callWindow = null
+    mainWindow?.webContents.send('call:active', false)
+    cleanupCallSession()
+    if (conversationId && endedPhase === 'ringing') {
+      appendRejectedCall(conversationId)
+    } else if (conversationId && endedPhase === 'active' && chatRepo.conversations().some((item) => item.id === conversationId)) {
+      const totalSeconds = Math.floor(durationMs / 1000)
+      if (callOnlyHistory.length) {
+        const transcript = callOnlyHistory.map((message) => `${message.role === 'user' ? '用户' : characterRepo.active().name}：${message.text}`).join('\n').slice(-1800)
+        memoryRepo.add({
+          characterId: callCharacterId ?? characterRepo.active().id,
+          kind: 'summary',
+          weight: 0.78,
+          text: `最近一次语音通话（${formatCallDuration(totalSeconds)}）：\n${transcript}`
+        })
+      }
+      chatRepo.append({ conversationId, role: endedInitiator, text: `语音通话已结束 · ${formatCallDuration(totalSeconds)}` })
+      const character = characterRepo.list().find((item) => item.id === callCharacterId) ?? characterRepo.active()
+      void callFarewell(character, totalSeconds, conversationId, callHistory).then((text) => {
+        if (!chatRepo.conversations().some((item) => item.id === conversationId)) return
+        deferredCallReplies.set(conversationId, text)
+        send({ type: 'done', text, conversationId, deferTextUntilSpeechFinished: true, forceSpeak: true }, conversationId)
+      }).catch((error) => {
+        console.warn('[call] 结束语写入失败：', error)
+        mainWindow?.webContents.send(CH.callEnded, conversationId)
+      })
+    }
+    callMainConversationId = null
+    callConversationId = null
+    callSeedMessageCount = 0
+    callCharacterId = null
+    callStartedAt = 0
+    callInitiator = 'user'
+    callPhase = 'active'
+    callMode = 'video'
+  })
+  if (isDev) {
+    const url = new URL(process.env['ELECTRON_RENDERER_URL'] as string)
+    url.searchParams.set('view', 'call')
+    url.searchParams.set('mode', mode)
+    void callWindow.loadURL(url.toString())
+  } else {
+    void callWindow.loadFile(join(__dirname, '../renderer/index.html'), { query: { view: 'call', mode } })
+  }
+  return true
+}
+
+function openRenderPreviewWindow(characterId: string, renderKey: string, config: unknown): boolean {
+  if (!characterRepo.list().some((item) => item.id === characterId)) throw new Error('角色不存在')
+  if (!renderPreviewWindow || renderPreviewWindow.isDestroyed()) {
+    renderPreviewWindow = new BrowserWindow({
+      width: 520,
+      height: 760,
+      minWidth: 360,
+      minHeight: 500,
+      show: false,
+      title: '语音通话模型渲染预览',
+      backgroundColor: '#f3f7fc',
+      autoHideMenuBar: true,
+      icon: app.isPackaged ? join(process.resourcesPath, 'app.ico') : join(app.getAppPath(), '../build/icon.ico'),
+      webPreferences: {
+        preload: join(__dirname, '../preload/index.js'),
+        sandbox: false,
+        contextIsolation: true,
+        nodeIntegration: false,
+        backgroundThrottling: false
+      }
+    })
+    renderPreviewWindow.on('closed', () => {
+      renderPreviewWindow = null
+      mainWindow?.webContents.send(CH.callRenderPreviewClosed)
+    })
+  }
+  const preview = renderPreviewWindow
+  const query = { view: 'call-render-preview', characterId }
+  const loading = isDev
+    ? (() => {
+        const url = new URL(process.env['ELECTRON_RENDERER_URL'] as string)
+        url.searchParams.set('view', query.view)
+        url.searchParams.set('characterId', characterId)
+        return preview.loadURL(url.toString())
+      })()
+    : preview.loadFile(join(__dirname, '../renderer/index.html'), { query })
+  void loading.then(() => {
+    if (!preview.isDestroyed()) {
+      preview.show()
+      preview.focus()
+      preview.webContents.send(CH.callRenderPreviewUpdate, renderKey, config)
+    }
+  })
+  return true
+}
+
+function cleanupCallSession(): void {
+  for (const id of activeCallConversationIds) {
+    conversationTurns.cancel(id)
+    try {
+      memoryRepo.clearConversation(id)
+      chatRepo.delete(id)
+    } catch { /* Temporary call session may already be gone. */ }
+  }
+  activeCallConversationIds.clear()
+  for (const id of callConversationIds) {
+    if (!inFlightCallConversationIds.has(id)) callConversationIds.delete(id)
+  }
+}
+
+const TEST_LIVE2D_MODEL = 'H:\\人物模型\\L2D\\Thelema2Elysia0829_by_MomokaSono_8eb77c3b82bddb450fa7761286bec4e4.zip'
+const TEST_MMD_MODEL = 'H:\\人物模型\\鸣潮_爱弥斯_校服（绑骨修模后）_by_鸣潮_64cc613d0d129d40b5b59e95f6eb0ee7\\鸣潮_爱弥斯_校服1.25.pmx'
+const OFFICIAL_LIVE2D_WEB_CORE = 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js'
+
+function bundledLive2DCorePath(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'live2d', 'live2dcubismcore.min.js')
+    : join(app.getAppPath(), 'resources', 'live2d', 'live2dcubismcore.min.js')
+}
+
+function findLive2DModelJson(root: string): string | null {
+  if (!existsSync(root)) return null
+  const stack = [root]
+  while (stack.length) {
+    const current = stack.pop()!
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = join(current, entry.name)
+      if (entry.isDirectory()) stack.push(path)
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith('.model3.json')) return path
+    }
+  }
+  return null
+}
+
+async function unpackLive2DArchive(zipPath: string): Promise<string> {
+  const archiveBytes = readFileSync(zipPath)
+  const archiveId = createHash('sha256').update(archiveBytes).digest('hex').slice(0, 20)
+  const destination = join(app.getPath('userData'), 'live2d-models', archiveId)
+  const existing = findLive2DModelJson(destination)
+  if (existing) return existing
+  const archive = await JSZip.loadAsync(archiveBytes)
+  mkdirSync(destination, { recursive: true })
+  const root = resolvePath(destination)
+  for (const entry of Object.values(archive.files)) {
+    if (entry.dir) continue
+    const output = resolvePath(destination, entry.name)
+    if (!output.startsWith(root + sep)) continue
+    mkdirSync(dirname(output), { recursive: true })
+    writeFileSync(output, await entry.async('nodebuffer'))
+  }
+  const model = findLive2DModelJson(destination)
+  if (!model) throw new Error('压缩包里没有找到 .model3.json 模型入口')
+  return model
+}
+
+async function prepareLive2DModel(characterId?: string): Promise<{ modelUrl: string; coreUrl: string; shaderUrl: string; modelName: string; missingCore: boolean; format: 'cubism' | 'mmd-pmx' | 'gltf'; idleMotionUrl?: string; talkMotionUrl?: string }> {
+  const config = settingsRepo.get().live2d
+  const character = characterId ? characterRepo.list().find((item) => item.id === characterId) : characterRepo.active()
+  const characterModelPath = character?.callModelPath?.trim()
+  const modelSource = characterModelPath || config.modelPath.trim()
+    || (character?.id === 'char_shorekeeper' && existsSync(SHOREKEEPER_CALL_MODEL) ? SHOREKEEPER_CALL_MODEL : '')
+    || (!app.isPackaged ? (existsSync(TEST_MMD_MODEL) ? TEST_MMD_MODEL : (existsSync(TEST_LIVE2D_MODEL) ? TEST_LIVE2D_MODEL : '')) : '')
+  if (!modelSource) throw new Error('尚未选择视频通话模型，请在「设置 → 语音通话」中选择模型文件')
+  if (!existsSync(modelSource)) throw new Error(`模型文件已移动或不存在，请重新选择：${modelSource}`)
+  if (extname(modelSource).toLowerCase() === '.glb') {
+    allowRoot(dirname(modelSource))
+    const idleMotion = join(app.isPackaged ? process.resourcesPath : join(app.getAppPath(), 'resources'), 'shorekeeper-motion', 'stand1.glb')
+    const useShorekeeperMotion = character?.id === 'char_shorekeeper' && modelSource === SHOREKEEPER_CALL_MODEL
+    if (useShorekeeperMotion && existsSync(idleMotion)) allowFile(idleMotion)
+    return {
+      modelUrl: toAppFileUrl(modelSource),
+      coreUrl: '', shaderUrl: '', modelName: character?.name || basename(modelSource, '.glb'),
+      missingCore: false, format: 'gltf',
+      idleMotionUrl: useShorekeeperMotion && existsSync(idleMotion) ? toAppFileUrl(idleMotion) : undefined
+    }
+  }
+  if (extname(modelSource).toLowerCase() === '.pmx') {
+    allowRoot(dirname(modelSource))
+    const motionDir = app.isPackaged ? join(process.resourcesPath, 'mmd-motions') : join(app.getAppPath(), 'resources', 'mmd-motions')
+    const wideIdleMotion = join(motionDir, 'idle-wait-loop-arms-wide.vmd')
+    const idleMotion = existsSync(wideIdleMotion) ? wideIdleMotion : join(motionDir, 'idle-wait-loop.vmd')
+    const talkMotion = join(motionDir, 'conversation-head-scratch.vmd')
+    if (existsSync(idleMotion) || existsSync(talkMotion)) allowRoot(motionDir)
+    return {
+      modelUrl: toAppFileUrl(modelSource),
+      coreUrl: '',
+      shaderUrl: '',
+      modelName: basename(modelSource, extname(modelSource)),
+      missingCore: false,
+      format: 'mmd-pmx',
+      idleMotionUrl: existsSync(idleMotion) ? toAppFileUrl(idleMotion) : undefined,
+      talkMotionUrl: existsSync(talkMotion) ? toAppFileUrl(talkMotion) : undefined
+    }
+  }
+  let modelJson: string | null = null
+  if (statSync(modelSource).isDirectory()) modelJson = findLive2DModelJson(modelSource)
+  else if (extname(modelSource).toLowerCase() === '.zip') modelJson = await unpackLive2DArchive(modelSource)
+  else if (modelSource.toLowerCase().endsWith('.model3.json')) modelJson = modelSource
+  if (!modelJson || !existsSync(modelJson)) throw new Error('未能在选择的位置找到有效的 Cubism 3/4 模型入口文件')
+  allowRoot(dirname(modelJson))
+  if (!config.modelPath && modelSource === TEST_LIVE2D_MODEL) settingsRepo.save({ live2d: { ...config, modelPath: modelSource } })
+  const corePath = config.corePath && existsSync(config.corePath) ? config.corePath : bundledLive2DCorePath()
+  const coreUrl = existsSync(corePath) ? toAppFileUrl(corePath) : OFFICIAL_LIVE2D_WEB_CORE
+  if (existsSync(corePath)) allowFile(corePath)
+  const shaderDir = join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'live2d', 'shaders')
+  if (!existsSync(shaderDir)) {
+    const localShaderDir = join(app.getAppPath(), 'resources', 'live2d', 'shaders')
+    if (existsSync(localShaderDir)) allowRoot(localShaderDir)
+  }
+  const effectiveShaderDir = existsSync(shaderDir) ? shaderDir : join(app.getAppPath(), 'resources', 'live2d', 'shaders')
+  return {
+    modelUrl: toAppFileUrl(modelJson),
+    coreUrl,
+    shaderUrl: toAppFileUrl(effectiveShaderDir + sep),
+    modelName: basename(dirname(modelJson)),
+    missingCore: false,
+    format: 'cubism'
+  }
 }
 
 function bootstrap(): AppBootstrap {
@@ -486,8 +946,10 @@ async function runAgentIntent(args: {
   model: ModelInfo
   attachments: Attachment[]
   intent: AgentIntent
+  signal?: AbortSignal
 }): Promise<boolean> {
   const { conversationId, userText, character, persona, settings, model, attachments, intent } = args
+  const emit = (chunk: ChatSendChunk): void => { args.signal?.throwIfAborted(); send(chunk, conversationId) }
 
   const spec = AGENT_TOOLS.find((x) => x.name === intent.tool)
   if (!spec) return false
@@ -511,10 +973,10 @@ async function runAgentIntent(args: {
       finishedAt: Date.now()
     }
     const blockedMsg = chatRepo.append({ conversationId, role: 'tool', text: blocked.actionLabel, toolCall: blocked })
-    send({ type: 'tool', toolCall: blocked, messageId: blockedMsg.id })
+    emit({ type: 'tool', toolCall: blocked, messageId: blockedMsg.id })
     const text = `${decision.reason}`
     const m = chatRepo.append({ conversationId, role: 'character', text })
-    send({ type: 'done', text, messageId: m.id })
+    emit({ type: 'done', text, messageId: m.id })
     return true
   }
 
@@ -536,7 +998,7 @@ async function runAgentIntent(args: {
   }
 
   const toolMsg = chatRepo.append({ conversationId, role: 'tool', text: toolCall.actionLabel, toolCall })
-  send({ type: 'tool', toolCall, messageId: toolMsg.id })
+  emit({ type: 'tool', toolCall, messageId: toolMsg.id })
 
   let approved = !needsApproval
   if (needsApproval) {
@@ -554,20 +1016,21 @@ async function runAgentIntent(args: {
   if (!approved) {
     const denied: ToolCallRecord = { ...toolCall, state: 'denied', summary: '用户拒绝了这次操作', finishedAt: Date.now() }
     chatRepo.updateMessage(toolMsg.id, { toolCall: denied })
-    send({ type: 'tool', toolCall: denied, messageId: toolMsg.id })
+    emit({ type: 'tool', toolCall: denied, messageId: toolMsg.id })
     const card = buildPersonaCard(character, persona)
     const text = pickPersonaLine(card, `好，那这次就不做了。需要的时候再叫我。`)
     const msg = chatRepo.append({ conversationId, role: 'character', text })
-    send({ type: 'done', text, messageId: msg.id })
+    emit({ type: 'done', text, messageId: msg.id })
     return true
   }
 
   const running: ToolCallRecord = { ...toolCall, state: 'running' }
   chatRepo.updateMessage(toolMsg.id, { toolCall: running })
-  send({ type: 'tool', toolCall: running, messageId: toolMsg.id })
+  emit({ type: 'tool', toolCall: running, messageId: toolMsg.id })
 
   try {
-    const output = await runAgentTool(spec.name, intent.params)
+    const output = await runAgentTool(spec.name, intent.params, args.signal)
+    args.signal?.throwIfAborted()
     const done: ToolCallRecord = {
       ...running,
       state: 'done',
@@ -576,7 +1039,7 @@ async function runAgentIntent(args: {
       finishedAt: Date.now()
     }
     chatRepo.updateMessage(toolMsg.id, { toolCall: done })
-    send({ type: 'tool', toolCall: done, messageId: toolMsg.id })
+    emit({ type: 'tool', toolCall: done, messageId: toolMsg.id })
 
     const text = await narrateAgentResult({
       character,
@@ -587,12 +1050,15 @@ async function runAgentIntent(args: {
       attachments,
       context: output.context,
       fallback: output.context || output.summary,
-      conversationId
+      conversationId,
+      signal: args.signal
     })
+    args.signal?.throwIfAborted()
     const msg = chatRepo.append({ conversationId, role: 'character', text })
-    send({ type: 'done', text, messageId: msg.id })
+    emit({ type: 'done', text, messageId: msg.id })
     return true
   } catch (err) {
+    args.signal?.throwIfAborted()
     const failed: ToolCallRecord = {
       ...running,
       state: 'failed',
@@ -601,11 +1067,11 @@ async function runAgentIntent(args: {
       finishedAt: Date.now()
     }
     chatRepo.updateMessage(toolMsg.id, { toolCall: failed })
-    send({ type: 'tool', toolCall: failed, messageId: toolMsg.id })
+    emit({ type: 'tool', toolCall: failed, messageId: toolMsg.id })
     const card = buildPersonaCard(character, persona)
     const text = `${card.incapable[0]} 报错是：${failed.error}`
     const msg = chatRepo.append({ conversationId, role: 'character', text })
-    send({ type: 'done', text, messageId: msg.id })
+    emit({ type: 'done', text, messageId: msg.id })
     return true
   }
 }
@@ -620,6 +1086,7 @@ async function narrateAgentResult(args: {
   context: string
   fallback: string
   conversationId?: string
+  signal?: AbortSignal
 }): Promise<string> {
   const { character, persona, settings, model, userText, attachments, context, fallback, conversationId } = args
   const useRemote = isModelUsable(model, settings)
@@ -637,7 +1104,7 @@ async function narrateAgentResult(args: {
     toolsEnabled: settings.agent.enabled,
     workspace: getWorkspace(),
     worldBook: worldBookFor(character, userText),
-    internalPrompt: internalPromptFor(character)
+    internalPrompt: [internalPromptFor(character), callRequestPrompt(userText, conversationId)].filter(Boolean).join('\n\n')
   })
 
   let full = ''
@@ -647,12 +1114,13 @@ async function narrateAgentResult(args: {
     system,
     history: [],
     userText: userText || '（工具执行完了）',
-    signal: new AbortController().signal,
+    signal: args.signal ?? new AbortController().signal,
     override: modelOverride(model, settings),
     cb: {
       onDelta: (d) => {
+        if (args.signal?.aborted) return
         full += d
-        send({ type: 'delta', text: d })
+        send({ type: 'delta', text: d }, conversationId)
       },
       onDone: () => {},
       onError: () => {
@@ -685,6 +1153,36 @@ async function handleUserTurn(
   userImage?: { path: string; sticker?: boolean; mood?: string; source?: string; name?: string; alt?: string },
   opening = false
 ): Promise<void> {
+  const turn = conversationTurns.start(conversationId, callConversationIds.has(conversationId) ? 70000 : 120000)
+  const onAbort = (): void => {
+    if (turn.isCurrent() && turn.controller.signal.reason?.name === 'TimeoutError') {
+      send({ type: 'error', error: '等待模型回复超时，请检查连接后重试' }, conversationId)
+    }
+  }
+  turn.controller.signal.addEventListener('abort', onAbort, { once: true })
+  try {
+    await performUserTurn(conversationId, userText, character, attachmentIds, userImage, opening, turn.controller)
+  } catch (error) {
+    if (!turn.controller.signal.aborted) throw error
+  } finally {
+    turn.controller.signal.removeEventListener('abort', onAbort)
+    turn.finish()
+  }
+}
+
+async function performUserTurn(
+  conversationId: string,
+  userText: string,
+  character: Character,
+  attachmentIds: string[],
+  userImage: { path: string; sticker?: boolean; mood?: string; source?: string; name?: string; alt?: string } | undefined,
+  opening: boolean,
+  controller: AbortController
+): Promise<void> {
+  const emit = (chunk: ChatSendChunk): void => {
+    controller.signal.throwIfAborted()
+    send(chunk, conversationId)
+  }
   const settings = settingsRepo.get()
   const persona = characterRepo.personaOf(character)
   const card = buildPersonaCard(character, persona)
@@ -699,12 +1197,12 @@ async function handleUserTurn(
     if (!dup) {
       memoryRepo.add({
         characterId: character.id,
-        conversationId,
+        ...(callConversationIds.has(conversationId) ? {} : { conversationId }),
         kind: 'event',
         weight: 0.72,
         text: userText.trim()
       })
-      send({ type: 'tool' })
+      emit({ type: 'tool' })
     }
   }
 
@@ -719,7 +1217,8 @@ async function handleUserTurn(
         settings,
         model,
         attachments,
-        intent: agentIntent
+        intent: agentIntent,
+        signal: controller.signal
       })
       if (handled) return
     }
@@ -743,10 +1242,10 @@ async function handleUserTurn(
         text: blocked.actionLabel,
         toolCall: blocked
       })
-      send({ type: 'tool', toolCall: blocked, messageId: blockedMsg.id })
+      emit({ type: 'tool', toolCall: blocked, messageId: blockedMsg.id })
       const text = localDecision.reason
       const m = chatRepo.append({ conversationId, role: 'character', text })
-      send({ type: 'done', text, messageId: m.id })
+      emit({ type: 'done', text, messageId: m.id })
       return
     }
 
@@ -759,7 +1258,7 @@ async function handleUserTurn(
       text: toolCall.actionLabel,
       toolCall
     })
-    send({ type: 'tool', toolCall, messageId: toolMsg.id })
+    emit({ type: 'tool', toolCall, messageId: toolMsg.id })
 
     let approved = !needsApproval
     if (needsApproval) {
@@ -782,19 +1281,20 @@ async function handleUserTurn(
         finishedAt: Date.now()
       }
       chatRepo.updateMessage(toolMsg.id, { toolCall: denied })
-      send({ type: 'tool', toolCall: denied, messageId: toolMsg.id })
+      emit({ type: 'tool', toolCall: denied, messageId: toolMsg.id })
       const text = `好，那这次就不动了。需要的时候再叫我。`
       const msg = chatRepo.append({ conversationId, role: 'character', text })
-      send({ type: 'done', text, messageId: msg.id })
+      emit({ type: 'done', text, messageId: msg.id })
       return
     }
 
     const running: ToolCallRecord = { ...toolCall, state: 'running' }
     chatRepo.updateMessage(toolMsg.id, { toolCall: running })
-    send({ type: 'tool', toolCall: running, messageId: toolMsg.id })
+    emit({ type: 'tool', toolCall: running, messageId: toolMsg.id })
 
     try {
       const output = await runTool(intent.tool, intent.params)
+      controller.signal.throwIfAborted()
       const done: ToolCallRecord = {
         ...running,
         state: 'done',
@@ -803,7 +1303,7 @@ async function handleUserTurn(
         finishedAt: Date.now()
       }
       chatRepo.updateMessage(toolMsg.id, { toolCall: done })
-      send({ type: 'tool', toolCall: done, messageId: toolMsg.id })
+      emit({ type: 'tool', toolCall: done, messageId: toolMsg.id })
 
       const text = await narrateResult({
         character,
@@ -812,11 +1312,14 @@ async function handleUserTurn(
         userText,
         context: output.context,
         fallback: () => offlineNarrate(intent.tool, intent.params, output.result),
-        conversationId
+        conversationId,
+        signal: controller.signal
       })
+      controller.signal.throwIfAborted()
       const msg = chatRepo.append({ conversationId, role: 'character', text })
-      send({ type: 'done', text, messageId: msg.id })
+      emit({ type: 'done', text, messageId: msg.id })
     } catch (err) {
+      controller.signal.throwIfAborted()
       const failed: ToolCallRecord = {
         ...running,
         state: 'failed',
@@ -825,10 +1328,10 @@ async function handleUserTurn(
         finishedAt: Date.now()
       }
       chatRepo.updateMessage(toolMsg.id, { toolCall: failed })
-      send({ type: 'tool', toolCall: failed, messageId: toolMsg.id })
+      emit({ type: 'tool', toolCall: failed, messageId: toolMsg.id })
       const text = `这一步我没做成，报错是：${failed.error}`
       const msg = chatRepo.append({ conversationId, role: 'character', text })
-      send({ type: 'done', text, messageId: msg.id })
+      emit({ type: 'done', text, messageId: msg.id })
     }
     return
   }
@@ -855,16 +1358,17 @@ async function handleUserTurn(
       })
     }
 
-    await emitTypewriter(reaction.text)
+    const reactionText = formatCasualSpeech(reaction.text)
+    await emitTypewriter(reactionText, conversationId, controller.signal)
     const msg = chatRepo.append({
       conversationId,
       role: 'character',
-      text: reaction.text,
+      text: reactionText,
       images: images.length ? (images as never) : undefined
     })
-    send({
+    emit({
       type: 'done',
-      text: reaction.text,
+      text: reactionText,
       messageId: msg.id,
       sticker: reaction.sticker ? withStickerDataUrl(reaction.sticker) : undefined
     } as never)
@@ -884,7 +1388,7 @@ async function handleUserTurn(
     toolsEnabled: settings.agent.enabled,
     workspace: getWorkspace(),
     worldBook: worldBookFor(character, userText),
-    internalPrompt: internalPromptFor(character)
+    internalPrompt: [internalPromptFor(character), callRequestPrompt(userText, conversationId)].filter(Boolean).join('\n\n')
   })
 
   const useRemote = isModelUsable(model, settings)
@@ -926,18 +1430,17 @@ async function handleUserTurn(
 
   if (!useRemote) {
     let text = '模型尚未连接。'
-    if (/^(你好|在吗|嗨|早上好|上午好|中午好|下午好|晚上好|早安|晚安|hello|hi)[！!。？?\s]*$/i.test(userText.trim())) text = relationshipSnapshot(character).greeting
+    if (/^(你好|在吗|嗨|早上好|上午好|中午好|下午好|晚上好|早安|晚安|hello|hi)[！!。？?\s]*$/i.test(userText.trim())) text = formatCasualSpeech(relationshipSnapshot(character, new Date(), true).greeting)
     else try { modelRoute(model, settings) } catch (error) { text = error instanceof Error ? error.message : String(error) }
-    await emitTypewriter(text)
+    await emitTypewriter(text, conversationId, controller.signal)
     const msg = chatRepo.append({ conversationId, role: 'character', text })
     const st = maybeSticker(text)
     const payload = st ? attachSticker(msg.id, st) : undefined
-    send({ type: 'done', text, messageId: msg.id, sticker: payload } as never)
+    emit({ type: 'done', text, messageId: msg.id, sticker: payload } as never)
     return
   }
 
-  const controller = new AbortController()
-  aborters.set(conversationId, controller)
+  controller.signal.throwIfAborted()
 
   let full = ''
   await streamOpenAICompatible({
@@ -947,7 +1450,7 @@ async function handleUserTurn(
     userText,
     signal: controller.signal,
     override: modelOverride(model, settings),
-    tools: settings.agent.enabled ? AGENT_TOOLS.filter(t => t.category === 'fs' || (t.category === 'shell' && settings.agent.allowShell) || (t.category === 'web' && settings.agent.allowWeb)) : undefined,
+    tools: settings.agent.enabled ? AGENT_TOOLS.filter(t => t.category === 'fs' || (t.category === 'shell' && settings.agent.allowShell && settings.agent.machinePermission === 'full') || (t.category === 'web' && settings.agent.allowWeb)) : undefined,
     executeTool: async (name, params) => {
       controller.signal.throwIfAborted()
       const spec = AGENT_TOOLS.find(t => t.name === name)!
@@ -957,43 +1460,46 @@ async function handleUserTurn(
         params, state: 'running', result: null, summary: '', createdAt: Date.now(), finishedAt: null
       }
       const message = chatRepo.append({ conversationId, role: 'tool', text: spec.displayName, toolCall })
-      send({ type: 'tool', toolCall, messageId: message.id })
+      emit({ type: 'tool', toolCall, messageId: message.id })
       try {
         const output = await runAgentTool(name, params, controller.signal)
+        controller.signal.throwIfAborted()
         const done: ToolCallRecord = { ...toolCall, state: 'done', result: output.result, summary: output.summary, finishedAt: Date.now() }
         chatRepo.updateMessage(message.id, { toolCall: done })
-        send({ type: 'tool', toolCall: done, messageId: message.id })
+        emit({ type: 'tool', toolCall: done, messageId: message.id })
         return output.context
       } catch (error) {
         const failed: ToolCallRecord = { ...toolCall, state: 'failed', error: error instanceof Error ? error.message : String(error), finishedAt: Date.now() }
         chatRepo.updateMessage(message.id, { toolCall: failed })
-        send({ type: 'tool', toolCall: failed, messageId: message.id })
+        emit({ type: 'tool', toolCall: failed, messageId: message.id })
         throw error
       }
     },
     cb: {
       onDelta: (delta) => {
+        if (controller.signal.aborted) return
         full += delta
-        send({ type: 'delta', text: delta })
+        emit({ type: 'delta', text: delta })
       },
       onDone: (text) => {
-        aborters.delete(conversationId)
+        if (controller.signal.aborted) return
         const finalText = text || full
         if (!finalText) {
-          send({ type: 'error', error: '模型没有返回内容' })
+          emit({ type: 'error', error: '模型没有返回内容' })
           return
         }
         const msg = chatRepo.append({ conversationId, role: 'character', text: finalText })
         const st = maybeSticker(finalText)
         const payload = st ? attachSticker(msg.id, st) : undefined
-        send({ type: 'done', text: finalText, messageId: msg.id, sticker: payload } as never)
+        maybeRingCharacterCall(conversationId, character, userText, finalText)
+        emit({ type: 'done', text: finalText, messageId: msg.id, sticker: payload } as never)
       },
       onError: (error) => {
-        aborters.delete(conversationId)
-        send({ type: 'error', error })
+        if (controller.signal.aborted) return
+        emit({ type: 'error', error })
         const fallback = `本轮未完成：${error}`
         const msg = chatRepo.append({ conversationId, role: 'character', text: fallback })
-        send({ type: 'done', text: fallback, messageId: msg.id })
+        emit({ type: 'done', text: fallback, messageId: msg.id })
       }
     }
   })
@@ -1015,23 +1521,26 @@ function personaChatReply(args: {
 
   const bad = violatesPersona(text, card)
   if (bad) {
-    return card.selfTone === 'lively' ? '嗯……我想想怎么说。你先说说看？' : '嗯。你说。'
+    return card.selfTone === 'lively' ? '嗯 我想想怎么说 你先说说看' : '嗯 你说'
   }
-  return text
+  return formatCasualSpeech(text)
 }
 
-async function emitTypewriter(text: string): Promise<void> {
+async function emitTypewriter(text: string, conversationId?: string, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
   const settings = settingsRepo.get()
   const speed = settings.chat.typeSpeedMs
   if (!settings.chat.stream || speed <= 0) {
-    send({ type: 'delta', text })
+    send({ type: 'delta', text }, conversationId)
     return
   }
   const chunks = text.match(/[^，。！？!?,\n]+[，。！？!?,\n]?/g) ?? [text]
   for (const c of chunks) {
-    send({ type: 'delta', text: c })
+    signal?.throwIfAborted()
+    send({ type: 'delta', text: c }, conversationId)
     await new Promise((r) => setTimeout(r, Math.min(420, speed * c.length)))
   }
+  signal?.throwIfAborted()
 }
 
 async function narrateResult(args: {
@@ -1042,13 +1551,14 @@ async function narrateResult(args: {
   context: string
   fallback: () => string
   conversationId?: string
+  signal?: AbortSignal
 }): Promise<string> {
   const { character, persona, settings, userText, context, fallback, conversationId } = args
   const selected = modelRepo.active()
   const useRemote = isModelUsable(selected, settings)
   if (!useRemote) {
     const text = fallback()
-    await emitTypewriter(text)
+    await emitTypewriter(text, conversationId, args.signal)
     return text
   }
   const memories = memoryRepo.search(userText, character.id, settings.chat.memoryTopK, conversationId)
@@ -1061,11 +1571,12 @@ async function narrateResult(args: {
     history: [],
     userText,
     override: modelOverride(selected, settings),
-    signal: new AbortController().signal,
+    signal: args.signal ?? new AbortController().signal,
     cb: {
       onDelta: (d) => {
+        if (args.signal?.aborted) return
         full += d
-        send({ type: 'delta', text: d })
+        send({ type: 'delta', text: d }, conversationId)
       },
       onDone: () => {},
       onError: () => {
@@ -1073,9 +1584,10 @@ async function narrateResult(args: {
       }
     }
   })
+  args.signal?.throwIfAborted()
   if (errored || !full) {
     const text = fallback()
-    await emitTypewriter(text)
+    await emitTypewriter(text, conversationId, args.signal)
     return text
   }
   return full
@@ -1120,6 +1632,165 @@ function resolveSplashVideo(): string {
 }
 
 function registerIpc(): void {
+  handle(CH.callRenderPreviewOpen, (characterId: string, renderKey: string, config: unknown) => {
+    if (!mainWindow || mainWindow.isDestroyed()) throw new Error('主窗口已关闭')
+    return openRenderPreviewWindow(characterId, renderKey, config)
+  })
+  handle(CH.callRenderPreviewClose, () => {
+    renderPreviewWindow?.close()
+    return true
+  })
+  ipcMain.handle(CH.callRenderPreviewUpdate, (event, renderKey: unknown, config: unknown) => {
+    if (event.sender !== mainWindow?.webContents || typeof renderKey !== 'string' || !config || typeof config !== 'object') {
+      return { ok: false, error: '无效的渲染预览请求' }
+    }
+    renderPreviewWindow?.webContents.send(CH.callRenderPreviewUpdate, renderKey, config)
+    return { ok: true, data: true }
+  })
+  ipcMain.handle(CH.callRuntimeUrl, (event) => {
+    if (!callWindow || callWindow.isDestroyed() || event.sender !== callWindow.webContents) {
+      return { ok: false, error: '仅通话窗口可读取识别引擎' }
+    }
+    const root = app.isPackaged
+      ? join(process.resourcesPath, 'stt-runtime')
+      : join(app.getAppPath(), 'resources', 'stt-runtime')
+    if (!existsSync(join(root, 'ort-wasm-simd-threaded.jsep.mjs')) || !existsSync(join(root, 'ort-wasm-simd-threaded.jsep.wasm'))) {
+      return { ok: false, error: '安装包缺少本地识别引擎文件' }
+    }
+    return { ok: true, data: toAppFileUrl(root + sep) }
+  })
+  ipcMain.handle(CH.callModelFile, async (event, relativePath: unknown) => {
+    if (!callWindow || callWindow.isDestroyed() || event.sender !== callWindow.webContents) {
+      return { ok: false, error: '仅通话窗口可读取识别模型' }
+    }
+    if (typeof relativePath !== 'string' || !/^[\w./-]+$/.test(relativePath) || relativePath.startsWith('/') || relativePath.split('/').includes('..')) {
+      return { ok: false, error: '无效的模型文件路径' }
+    }
+    const root = app.isPackaged
+      ? join(process.resourcesPath, 'stt-model', 'onnx-community', 'whisper-tiny')
+      : join(app.getAppPath(), 'resources', 'stt-model', 'onnx-community', 'whisper-tiny')
+    const file = resolvePath(root, ...relativePath.split('/'))
+    if (!file.startsWith(resolvePath(root) + sep)) return { ok: false, error: '无效的模型文件路径' }
+    if (!existsSync(file)) return { ok: true, data: null }
+    return { ok: true, data: new Uint8Array(readFileSync(file)) }
+  })
+  handle(CH.callOpen, (conversationId?: string, mode: CallMode = 'video') => openCallWindow(conversationId, 'user', 'active', mode === 'voice' ? 'voice' : 'video'))
+  handle(CH.callStateGet, () => ({ phase: callPhase === 'ringing' ? 'ringing' : 'active', initiator: callInitiator, mode: callMode }))
+  handle(CH.callSpeechFinished, (conversationId: string) => {
+    const deferredReply = deferredCallReplies.get(conversationId)
+    if (deferredReply) {
+      deferredCallReplies.delete(conversationId)
+      if (chatRepo.conversations().some((item) => item.id === conversationId)) {
+        chatRepo.append({ conversationId, role: 'character', text: deferredReply })
+        mainWindow?.webContents.send(CH.callEnded, conversationId)
+      }
+    }
+    if (!pendingCharacterCall || pendingCharacterCall.conversationId !== conversationId) return false
+    const pending = pendingCharacterCall
+    pendingCharacterCall = null
+    if (!chatRepo.conversations().some((item) => item.id === pending.conversationId)) return false
+    return openCallWindow(pending.conversationId, 'character', 'ringing', pending.mode)
+  })
+  handle(CH.callAccept, () => {
+    if (!callWindow || callWindow.isDestroyed() || callPhase !== 'ringing') throw new Error('当前没有等待接听的来电')
+    callPhase = 'active'
+    callStartedAt = Date.now()
+    const character = characterRepo.list().find((item) => item.id === callCharacterId) ?? characterRepo.active()
+    return { greeting: callGreeting(character) }
+  })
+  handle(CH.callReject, () => {
+    if (!callWindow || callWindow.isDestroyed() || callPhase !== 'ringing') throw new Error('当前没有等待接听的来电')
+    if (callMainConversationId) appendRejectedCall(callMainConversationId)
+    callPhase = 'rejected'
+    callWindow.close()
+    return true
+  })
+  handle(CH.callBegin, () => {
+    if (!callWindow || callWindow.isDestroyed()) throw new Error('通话窗口已关闭')
+    if (callConversationId && activeCallConversationIds.has(callConversationId)) return { conversationId: callConversationId, greeting: null }
+    const character = characterRepo.list().find(item => item.id === callCharacterId) ?? characterRepo.active()
+    const conversation = chatRepo.create(character.id, '语音通话（临时）')
+    const parentConversation = callMainConversationId
+      ? chatRepo.conversations().find((item) => item.id === callMainConversationId && item.characterId === character.id)
+      : undefined
+    callSeedMessageCount = 0
+    if (parentConversation) {
+      for (const message of chatRepo.recent(parentConversation.id, 16)) {
+        if (message.role === 'user' || message.role === 'character') {
+          chatRepo.append({ conversationId: conversation.id, role: message.role, text: message.text })
+          callSeedMessageCount++
+        }
+      }
+    }
+    callConversationId = conversation.id
+    callConversationIds.add(conversation.id)
+    activeCallConversationIds.add(conversation.id)
+    const greeting = callPhase === 'active'
+      ? callGreeting(characterRepo.list().find((item) => item.id === callCharacterId) ?? characterRepo.active())
+      : null
+    return { conversationId: conversation.id, greeting }
+  })
+  handle(CH.callSend, (req: { conversationId: string; text: string }) => {
+    const text = req.text.trim()
+    if (!callWindow || callWindow.isDestroyed()) throw new Error('通话窗口已关闭')
+    if (!activeCallConversationIds.has(req.conversationId)) throw new Error('通话会话已结束，请重新打开通话')
+    if (req.conversationId !== callConversationId || callPhase !== 'active') throw new Error('当前通话尚未接通')
+    if (!text) throw new Error('请输入内容')
+    const character = characterRepo.list().find(item => item.id === callCharacterId) ?? characterRepo.active()
+    const userMsg = chatRepo.append({ conversationId: req.conversationId, role: 'user', text })
+    recordInteraction(character.id, userMsg.id, text)
+    const request = Symbol('call-turn')
+    inFlightCallConversationIds.set(req.conversationId, request)
+    void handleUserTurn(req.conversationId, text, character).catch((error) => {
+      if (!activeCallConversationIds.has(req.conversationId) || inFlightCallConversationIds.get(req.conversationId) !== request) return
+      const message = `本轮未完成：${error instanceof Error ? error.message : String(error)}`
+      const response = chatRepo.append({ conversationId: req.conversationId, role: 'character', text: message })
+      send({ type: 'error', error: message }, req.conversationId)
+      send({ type: 'done', text: message, messageId: response.id }, req.conversationId)
+    }).finally(() => {
+      if (inFlightCallConversationIds.get(req.conversationId) !== request) return
+      inFlightCallConversationIds.delete(req.conversationId)
+      if (!activeCallConversationIds.has(req.conversationId)) {
+        memoryRepo.clearConversation(req.conversationId)
+        chatRepo.delete(req.conversationId)
+        callConversationIds.delete(req.conversationId)
+      }
+    })
+    return { messageId: userMsg.id }
+  })
+  ipcMain.on(CH.callClose, (event) => {
+    if (callWindow && !callWindow.isDestroyed() && event.sender === callWindow.webContents) callWindow.close()
+  })
+  handle(CH.live2dPickModel, async (currentPath?: string) => {
+    const current = currentPath || settingsRepo.get().live2d.modelPath
+    const res = await dialog.showOpenDialog({
+      title: '选择 Live2D、MMD 或 GLB 通话模型',
+      defaultPath: current || (existsSync(TEST_LIVE2D_MODEL) ? TEST_LIVE2D_MODEL : undefined),
+      properties: ['openFile'],
+      filters: [
+        { name: 'Live2D / 3D 通话模型', extensions: ['json', 'zip', 'pmx', 'glb'] },
+        { name: 'Live2D 模型入口', extensions: ['json'] },
+        { name: 'ZIP 压缩包', extensions: ['zip'] }
+      ]
+    })
+    if (res.canceled || !res.filePaths.length) return null
+    const modelPath = res.filePaths[0]
+    return modelPath
+  })
+  handle(CH.live2dPickCore, async () => {
+    const current = settingsRepo.get().live2d.corePath
+    const res = await dialog.showOpenDialog({
+      title: '选择 Live2D Cubism Core（官方 SDK 中的 JavaScript 文件）',
+      defaultPath: current || undefined,
+      properties: ['openFile'],
+      filters: [{ name: 'JavaScript', extensions: ['js'] }]
+    })
+    if (res.canceled || !res.filePaths.length) return null
+    const corePath = res.filePaths[0]
+    settingsRepo.save({ live2d: { ...settingsRepo.get().live2d, corePath } })
+    return corePath
+  })
+  handle(CH.live2dPrepare, (characterId?: string) => prepareLive2DModel(characterId))
   handle('splash:status', () => splashMediaStatus())
   handle('splash:pick', () => pickSplashMedia())
   handle('splash:reset', () => resetSplashMedia())
@@ -1132,19 +1803,16 @@ function registerIpc(): void {
     const character = characterRepo.active()
     const conversation = chatRepo.ensureConversation(character.id)
     let didGreet = false
+    let openingOpus: string | null = null
     if (!greetedCharacters.has(character.id)) {
       greetedCharacters.add(character.id)
-      const snap = relationshipSnapshot(character)
-      chatRepo.append({ conversationId: conversation.id, role: 'character', text: snap.greeting, proactive: true })
+      const snap = relationshipSnapshot(character, new Date(), true)
+      chatRepo.append({ conversationId: conversation.id, role: 'character', text: formatCasualSpeech(snap.greeting), proactive: true })
       didGreet = true
-    }
-    let openingOpus: string | null = null
-    if (didGreet) {
       try {
-        const raw = relationshipSnapshot(character).greetingRaw
-        const picked = findOpusByLine(character.id, raw)
+        const picked = findOpusByLine(character.id, snap.greetingRaw)
         if (picked) openingOpus = opusToFileUrl(picked.path)
-        else console.warn('[greet] Opus 未匹配到台词：', JSON.stringify(raw), '| dir=', opusDir(character.id))
+        else console.warn('[greet] Opus 未匹配到台词：', JSON.stringify(snap.greetingRaw), '| dir=', opusDir(character.id))
       } catch (err) {
         console.warn('[greet] Opus 匹配失败：', err)
       }
@@ -1152,9 +1820,6 @@ function registerIpc(): void {
     return { conversation, messages: chatRepo.messages(conversation.id), conversations: chatRepo.conversations(character.id), characterId: character.id, openingOpus, didGreet }
   })
   registerSystemIpc()
-  installApprovalPrompt(requestOperationApproval)
-  handle('approval:pending', () => pendingOperationApprovals())
-  handle('approval:decide', (id: string, approved: boolean) => decideOperationApproval(id, approved))
   handle(CH.workspaceSecurity, () => securityState(getWorkspace()))
   handle(CH.workspaceTrust, (trusted: boolean) => {
     if (typeof trusted !== 'boolean') throw new Error('无效信任状态')
@@ -1279,6 +1944,7 @@ function registerIpc(): void {
   handle(CH.conversationList, (characterId?: string) => chatRepo.conversations(characterId))
   handle(CH.conversationCreate, (characterId: string, title?: string) => chatRepo.create(characterId, title))
   handle(CH.conversationDelete, (id: string) => {
+    conversationTurns.cancel(id)
     try {
       memoryRepo.clearConversation(id)
     } catch {
@@ -1316,14 +1982,54 @@ function registerIpc(): void {
       })
       const opening = recordInteraction(character.id, userMsg.id, req.text)
       void handleUserTurn(req.conversationId, req.text || '请阅读并概括附件内容。', character, requestedAttachments, req.image, opening).catch(error => {
+        if (!chatRepo.conversations().some(item => item.id === req.conversationId)) return
         const text = `本轮未完成：${error instanceof Error ? error.message : String(error)}`
         const message = chatRepo.append({ conversationId: req.conversationId, role: 'character', text })
-        send({ type: 'error', error: text })
-        send({ type: 'done', text, messageId: message.id })
+        send({ type: 'error', error: text }, req.conversationId)
+        send({ type: 'done', text, messageId: message.id }, req.conversationId)
       })
       return { messageId: userMsg.id }
     }
   )
+
+  handle(CH.chatProactive, (conversationId: string) => {
+    const character = characterRepo.active()
+    if (!chatRepo.conversations(character.id).some((item) => item.id === conversationId)) return null
+
+    const persona = characterRepo.personaOf(character)
+    const card = buildPersonaCard(character, persona)
+    const address = card.address || '你'
+    const linesByTone: Record<typeof card.selfTone, string[]> = {
+      warm: [
+        `${address}，这会儿在忙什么呀？如果有点累，也可以和我说说。`,
+        `${address}，最近有没有什么想做、但还没来得及开始的事？我可以陪你一起想想。`,
+        `今天过得怎么样，${address}？有没有什么事情想和我分享？`
+      ],
+      lively: [
+        `嘿，${address}！现在在做什么呢？今天有没有遇到什么有意思的事？`,
+        `${address}，最近有什么想完成的小目标吗？要不要现在一起安排一下？`,
+        `忙了一阵啦，${address}！现在最想做的事情是什么？`
+      ],
+      cold: [
+        `${address}，现在方便聊聊吗？手头有没有一件需要优先处理的事？`,
+        `你现在在忙什么，${address}？如果需要，我可以帮你理一下接下来的安排。`,
+        `${address}，最近有什么计划还没决定好吗？`
+      ],
+      calm: [
+        `${address}，现在在做什么呢？如果有需要处理的事，我们可以一起梳理。`,
+        `今天还顺利吗，${address}？最近有没有什么想完成的事情？`,
+        `${address}，这会儿有空聊两句吗？你最近最挂心的是什么？`
+      ]
+    }
+    const candidates = linesByTone[card.selfTone]
+    const recent = chatRepo.recent(conversationId, 12)
+      .filter((message) => message.role === 'character' && message.proactive)
+      .map((message) => message.text)
+    const fresh = candidates.filter((line) => !recent.includes(line))
+    const pool = fresh.length ? fresh : candidates
+    const text = pool[Math.floor(Math.random() * pool.length)]
+    return chatRepo.append({ conversationId, role: 'character', text, proactive: true })
+  })
 
   handle(
     CH.stickerProactive,
@@ -1353,8 +2059,8 @@ function registerIpc(): void {
     }
   )
   handle(CH.chatAbort, (conversationId: string) => {
-    aborters.get(conversationId)?.abort()
-    aborters.delete(conversationId)
+    conversationTurns.cancel(conversationId)
+    send({ type: 'cancelled' }, conversationId)
     return true
   })
 
@@ -1386,12 +2092,36 @@ function registerIpc(): void {
   })
 
   handle(CH.settingsGet, () => settingsRepo.get())
-  handle(CH.settingsSave, (patch: Partial<AppSettings>) => {
+  handle(CH.settingsSave, async (patch: Partial<AppSettings>) => {
+    const previous = settingsRepo.get()
     if (patch.agent?.workspace) setWorkspace(patch.agent.workspace)
     if (patch.agent) clearApprovals()
-    return settingsRepo.save(patch)
+    const next = settingsRepo.save(patch)
+    if (patch.voiceCall?.backgroundPath) allowFile(patch.voiceCall.backgroundPath)
+    for (const background of Object.values(patch.voiceCall?.backgroundByCharacter ?? {})) {
+      if (background.path) allowFile(background.path)
+    }
+    if (patch.network) await applyNetworkConfig(next.network)
+    if (patch.general?.autoUpdateEnabled && !previous.general.autoUpdateEnabled && app.isPackaged) void checkForAppUpdates().catch((error) => {
+      setAppUpdateState({ status: 'error', message: getAppUpdateErrorMessage(error) })
+    })
+    return next
   })
-  handle(CH.settingsReset, () => settingsRepo.reset())
+  handle(CH.settingsReset, async () => {
+    const next = settingsRepo.reset()
+    await applyNetworkConfig(next.network)
+    return next
+  })
+  handle(CH.appUpdateCheck, async () => {
+    await checkForAppUpdates()
+    return appUpdateState
+  })
+  handle(CH.appUpdateStateGet, () => appUpdateState)
+  handle(CH.appUpdateInstall, () => {
+    if (appUpdateState.status !== 'ready') return false
+    autoUpdater.quitAndInstall()
+    return true
+  })
 
   handle(CH.voicePresets, () => VOICE_PRESETS)
   handle(CH.voiceAssets, () => listVoiceAssets())
@@ -1399,12 +2129,17 @@ function registerIpc(): void {
     resolveVoicePath(input.voicePackFile, input.customPackPath)
   )
   handle(CH.voicePickFile, async () => {
+    const bundledReferenceVoices = app.isPackaged
+      ? join(process.resourcesPath, 'reference-voices')
+      : join(app.getAppPath(), 'resources', 'reference-voices')
     const res = await dialog.showOpenDialog({
       title: '选择语音文件',
+      defaultPath: existsSync(bundledReferenceVoices) ? bundledReferenceVoices : undefined,
       properties: ['openFile'],
       filters: [{ name: '音频', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'] }]
     })
     if (res.canceled || !res.filePaths.length) return null
+    allowFile(res.filePaths[0])
     return res.filePaths[0]
   })
   handle(CH.voiceImport, async () => {
@@ -1420,6 +2155,69 @@ function registerIpc(): void {
   handle(CH.voiceDelete, (fileName: string) => {
     deleteVoiceFile(fileName)
     return listVoiceAssets()
+  })
+  handle(CH.indexTtsStatus, () => {
+    const cfg = settingsRepo.get().localTts
+    const status = indexTtsStatus(cfg)
+    if (status.ok && (
+      cfg.serviceCommand !== status.paths.repo
+      || cfg.qwen3Runner !== status.paths.python
+      || cfg.modelPath !== status.paths.modelDir
+    )) {
+      settingsRepo.save({ localTts: {
+        ...cfg,
+        serviceCommand: status.paths.repo,
+        qwen3Runner: status.paths.python,
+        modelPath: status.paths.modelDir
+      } })
+    }
+    return status
+  })
+  handle(CH.indexTtsVoices, (requestedDirectory?: string) => {
+    const selected = requestedDirectory?.trim() || settingsRepo.get().localTts.refAudioDirectory.trim()
+    const directory = selected || (app.isPackaged
+      ? join(process.resourcesPath, 'reference-voices')
+      : join(app.getAppPath(), 'resources', 'reference-voices'))
+    const voices = listReferenceVoices(directory)
+    for (const voice of voices) allowFile(voice.path)
+    return { directory, voices }
+  })
+  handle(CH.indexTtsPickVoiceFolder, async () => {
+    const current = settingsRepo.get().localTts.refAudioDirectory
+    const res = await dialog.showOpenDialog({
+      title: '选择参考音色文件夹',
+      defaultPath: current || undefined,
+      properties: ['openDirectory']
+    })
+    if (res.canceled || !res.filePaths.length) return null
+    return res.filePaths[0]
+  })
+  handle(CH.indexTtsInstall, async () => {
+    const installed = await installIndexTts((progress) => {
+      mainWindow?.webContents.send(CH.indexTtsInstallProgress, progress)
+    })
+    const current = settingsRepo.get()
+    settingsRepo.save({ localTts: {
+      ...current.localTts,
+      serviceCommand: installed.repo,
+      qwen3Runner: installed.python,
+      modelPath: installed.modelDir
+    } })
+    return installed
+  })
+  handle(CH.indexTtsSynthesize, async (input: { text: string; refAudioPath?: string }) => {
+    const cfg = settingsRepo.get().localTts
+    const result = await synthesizeIndexTts({ ...cfg, refAudioPath: input.refAudioPath || cfg.refAudioPath }, input.text)
+    return { ...result, url: 'file:///' + result.path.replace(/\\/g, '/') }
+  })
+  handle(CH.gptSovitsProbe, (endpoint: string) => probeGptSovits(endpoint, settingsRepo.get().localTts.gptSovitsProbePath))
+  handle(CH.gptSovitsSynthesize, (input: { text: string; refAudioPath?: string; refText?: string }) => {
+    const cfg = settingsRepo.get().localTts
+    return synthesizeGptSovits({ ...cfg, refAudioPath: input.refAudioPath || cfg.refAudioPath, refText: input.refText || cfg.refText }, input.text)
+  })
+  handle(CH.localHttpTtsSynthesize, (input: { engine: 'openai-local' | 'http-local'; text: string; voiceId?: string }) => {
+    if (input.engine !== 'openai-local' && input.engine !== 'http-local') throw new Error('不支持的本地语音接口')
+    return synthesizeLocalHttpTts(settingsRepo.get().localTts, input.engine, input.text, input.voiceId)
   })
 
   handle(CH.inworldVoices, async (patch?: Partial<CloudTtsConfig>) => {
@@ -1601,6 +2399,11 @@ function registerIpc(): void {
   handle(CH.installedApps, () => TOOL_SPECS)
 
   handle(CH.modelList, () => modelRepo.list())
+  handle(CH.modelConnectionTest, (input: { baseUrl: string; apiKey?: string; model?: string }) => {
+    const url = new URL(input.baseUrl.trim())
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('请填写有效的 HTTP(S) 服务地址，密钥请填入独立输入框')
+    return probeEndpoint(url.toString().replace(/\/$/, ''), input.apiKey?.trim() || undefined, 15000, input.model?.trim() || undefined)
+  })
   handle(CH.modelSelectable, () => modelRepo.selectable())
   handle(CH.modelState, () => modelRepo.state())
   handle(CH.modelSetActive, (id: string) => {
@@ -1615,7 +2418,7 @@ function registerIpc(): void {
     const cfg = settingsRepo.get()
     const sameOrigin = new URL(baseUrl).origin === new URL(cfg.llm.baseUrl).origin
     const apiKey = input.apiKey ?? target.apiKey ?? (sameOrigin ? cfg.llm.apiKey : '')
-    const r = await probeEndpoint(baseUrl, apiKey || undefined, 8000, target?.model)
+    const r = await probeEndpoint(baseUrl, apiKey || undefined, 15000, target?.model)
     if (target && target.kind === 'local') {
       modelRepo.markConnected(target.id, r.ok)
     }
@@ -1841,11 +2644,54 @@ function registerIpc(): void {
 registerAppFileScheme()
 
 app.whenReady().then(() => {
+  const audioOnlyMediaRequest = (details: unknown): boolean => {
+    const mediaTypes = (details as { mediaTypes?: unknown })?.mediaTypes
+    if (!Array.isArray(mediaTypes)) return true
+    return !mediaTypes.includes('video')
+  }
+  // Settings needs temporary microphone access to reveal real device names;
+  // the call window needs it for push-to-talk recording.
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => {
+    callback(permission === 'media' && (webContents === callWindow?.webContents || webContents === mainWindow?.webContents) && audioOnlyMediaRequest(details))
+  })
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, _origin, details) => {
+    if (permission !== 'media' || (webContents !== callWindow?.webContents && webContents !== mainWindow?.webContents)) return false
+    return audioOnlyMediaRequest(details)
+  })
   installAppFileProtocol()
+  void applyNetworkConfig(settingsRepo.get().network).catch((error) => console.warn('应用网络代理失败', error))
+  setupAppUpdater()
   try {
     allowRoot(getWorkspace())
+    const legacyCallBackground = settingsRepo.get().voiceCall
+    if (legacyCallBackground.backgroundPath) {
+      const activeCharacterId = characterRepo.active().id
+      settingsRepo.save({ voiceCall: {
+        ...legacyCallBackground,
+        backgroundPath: '',
+        backgroundByCharacter: {
+          ...legacyCallBackground.backgroundByCharacter,
+          [activeCharacterId]: legacyCallBackground.backgroundByCharacter?.[activeCharacterId] ?? {
+            path: legacyCallBackground.backgroundPath,
+            kind: legacyCallBackground.backgroundKind
+          }
+        }
+      } })
+    }
     const bg = themeRepo.state()?.background
     if (bg?.mediaPath) allowFile(bg.mediaPath)
+    const ringtonePath = settingsRepo.get().voiceCall.ringtonePath
+    if (ringtonePath && existsSync(ringtonePath)) allowFile(ringtonePath)
+    const callBackgroundPath = settingsRepo.get().voiceCall.backgroundPath
+    if (callBackgroundPath && existsSync(callBackgroundPath)) allowFile(callBackgroundPath)
+    for (const background of Object.values(settingsRepo.get().voiceCall.backgroundByCharacter ?? {})) {
+      if (background.path && existsSync(background.path)) allowFile(background.path)
+    }
+    const userAvatar = settingsRepo.get().chat.appearance.userAvatar
+    if (userAvatar && !/^(https?:|data:)/i.test(userAvatar)) {
+      const avatarPath = userAvatar.replace(/^(file|appfile):\/\/\/?/i, '')
+      if (/^[a-zA-Z]:/.test(avatarPath)) allowFile(avatarPath)
+    }
     for (const c of characterRepo.list()) {
       for (const u of [c.avatar?.main, c.avatar?.secondary, c.avatar?.banner]) {
         if (u && !/^https?:/i.test(u)) {
@@ -1878,6 +2724,11 @@ app.whenReady().then(() => {
   if (settingsRepo.get().general.minimizeToTray) createTray()
 
   void refreshCaches()
+  if (settingsRepo.get().general.autoUpdateEnabled) {
+    setTimeout(() => void checkForAppUpdates().catch((error) => {
+      setAppUpdateState({ status: 'error', message: getAppUpdateErrorMessage(error) })
+    }), 8000)
+  }
 
   try {
     pruneTtsCache(60)

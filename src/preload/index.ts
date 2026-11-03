@@ -1,7 +1,11 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { CH } from '../shared/channels'
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<T> => ipcRenderer.invoke(channel, ...args)
+let latestRenderPreviewUpdate: { renderKey: string; config: unknown } | null = null
+ipcRenderer.on(CH.callRenderPreviewUpdate, (_event, renderKey: string, config: unknown) => {
+  latestRenderPreviewUpdate = { renderKey, config }
+})
 
 const api = {
   splash: {
@@ -20,6 +24,47 @@ const api = {
     return () => ipcRenderer.removeListener('app:stateChanged', listener)
   },
   bootstrap: () => invoke(CH.bootstrap),
+  call: {
+    open: (conversationId?: string, mode: 'voice' | 'video' = 'video') => invoke(CH.callOpen, conversationId, mode),
+    close: () => ipcRenderer.send(CH.callClose),
+    begin: () => invoke(CH.callBegin),
+    send: (input: { conversationId: string; text: string }) => invoke(CH.callSend, input),
+    modelFile: (relativePath: string) => invoke(CH.callModelFile, relativePath),
+    runtimeUrl: () => invoke(CH.callRuntimeUrl),
+    renderPreviewOpen: (characterId: string, renderKey: string, config: unknown) => invoke(CH.callRenderPreviewOpen, characterId, renderKey, config),
+    renderPreviewClose: () => invoke(CH.callRenderPreviewClose),
+    renderPreviewUpdate: (renderKey: string, config: unknown) => invoke(CH.callRenderPreviewUpdate, renderKey, config),
+    onRenderPreviewUpdate: (cb: (renderKey: string, config: unknown) => void) => {
+      const listener = (_e: unknown, renderKey: string, config: unknown): void => cb(renderKey, config)
+      ipcRenderer.on(CH.callRenderPreviewUpdate, listener)
+      if (latestRenderPreviewUpdate) cb(latestRenderPreviewUpdate.renderKey, latestRenderPreviewUpdate.config)
+      return () => ipcRenderer.removeListener(CH.callRenderPreviewUpdate, listener)
+    },
+    onRenderPreviewClosed: (cb: () => void) => {
+      const listener = (): void => cb()
+      ipcRenderer.on(CH.callRenderPreviewClosed, listener)
+      return () => ipcRenderer.removeListener(CH.callRenderPreviewClosed, listener)
+    },
+    state: () => invoke(CH.callStateGet),
+    accept: () => invoke(CH.callAccept),
+    reject: () => invoke(CH.callReject),
+    speechFinished: (conversationId: string) => invoke(CH.callSpeechFinished, conversationId),
+    onState: (cb: (active: boolean) => void) => {
+      const listener = (_e: unknown, active: boolean): void => cb(active)
+      ipcRenderer.on('call:active', listener)
+      return () => ipcRenderer.removeListener('call:active', listener)
+    },
+    onEnded: (cb: (conversationId: string) => void) => {
+      const listener = (_e: unknown, conversationId: string): void => cb(conversationId)
+      ipcRenderer.on(CH.callEnded, listener)
+      return () => ipcRenderer.removeListener(CH.callEnded, listener)
+    }
+  },
+  live2d: {
+    pickModel: (currentPath?: string) => invoke(CH.live2dPickModel, currentPath),
+    pickCore: () => invoke(CH.live2dPickCore),
+    prepare: (characterId?: string) => invoke(CH.live2dPrepare, characterId)
+  },
 
   character: {
     list: () => invoke(CH.characterList),
@@ -55,6 +100,7 @@ const api = {
       attachmentIds?: string[]
       image?: unknown
     }) => invoke(CH.chatSend, input),
+    proactive: (conversationId: string) => invoke(CH.chatProactive, conversationId),
     abort: (conversationId: string) => invoke(CH.chatAbort, conversationId),
     onStream: (cb: (chunk: unknown) => void) => {
       const listener = (_e: unknown, chunk: unknown): void => cb(chunk)
@@ -95,6 +141,35 @@ const api = {
     providers: () => invoke(CH.ttsProviders),
     models: (provider?: string) => invoke(CH.ttsModels, provider),
     switchProvider: (provider: string) => invoke(CH.ttsSwitchProvider, provider)
+  },
+  indexTts: {
+    status: () => invoke(CH.indexTtsStatus),
+    voices: (directory?: string) => invoke(CH.indexTtsVoices, directory),
+    pickVoiceFolder: () => invoke(CH.indexTtsPickVoiceFolder),
+    synthesize: (text: string, refAudioPath?: string) => invoke(CH.indexTtsSynthesize, { text, refAudioPath }),
+    install: () => invoke(CH.indexTtsInstall),
+    onInstallProgress: (cb: (progress: unknown) => void) => {
+      const listener = (_e: unknown, progress: unknown): void => cb(progress)
+      ipcRenderer.on(CH.indexTtsInstallProgress, listener)
+      return () => ipcRenderer.removeListener(CH.indexTtsInstallProgress, listener)
+    }
+  },
+  appUpdate: {
+    check: () => invoke(CH.appUpdateCheck),
+    state: () => invoke(CH.appUpdateStateGet),
+    install: () => invoke(CH.appUpdateInstall),
+    onState: (cb: (state: unknown) => void) => {
+      const listener = (_e: unknown, state: unknown): void => cb(state)
+      ipcRenderer.on(CH.appUpdateState, listener)
+      return () => ipcRenderer.removeListener(CH.appUpdateState, listener)
+    }
+  },
+  gptSovits: {
+    probe: (endpoint: string) => invoke(CH.gptSovitsProbe, endpoint),
+    synthesize: (text: string, overrides?: { refAudioPath?: string; refText?: string }) => invoke(CH.gptSovitsSynthesize, { text, ...overrides })
+  },
+  localHttpTts: {
+    synthesize: (input: { engine: 'openai-local' | 'http-local'; text: string; voiceId?: string }) => invoke(CH.localHttpTtsSynthesize, input)
   },
   ttsEnv: {
     status: () => invoke(CH.ttsEnvStatus),
@@ -141,6 +216,7 @@ const api = {
     state: () => invoke(CH.modelState),
     setActive: (id: string) => invoke(CH.modelSetActive, id),
     probe: (input: { id: string; baseUrl?: string; apiKey?: string }) => invoke(CH.modelProbe, input),
+    connectionTest: (input: { baseUrl: string; apiKey?: string; model?: string }) => invoke(CH.modelConnectionTest, input),
     add: (input: unknown) => invoke(CH.modelAdd, input),
     remove: (id: string) => invoke(CH.modelRemove, id),
     update: (input: { id: string; patch: unknown }) => invoke(CH.modelUpdate, input),
@@ -152,6 +228,10 @@ const api = {
     list: () => invoke(CH.attList),
     pick: () => invoke(CH.attPick),
     importFile: (path: string) => invoke(CH.attImport, path),
+    importDropped: (file: File) => {
+      const path = webUtils.getPathForFile(file)
+      return path ? invoke(CH.attImport, path) : Promise.resolve(null)
+    },
     external: (path: string) => invoke(CH.attExternal, path),
     remove: (id: string) => invoke(CH.attDelete, id),
     open: (path: string) => invoke(CH.attOpen, path)

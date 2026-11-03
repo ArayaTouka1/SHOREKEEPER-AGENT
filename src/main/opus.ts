@@ -5,6 +5,7 @@
 
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
+import { randomInt } from 'node:crypto'
 import { app } from 'electron'
 
 const OPUS_DIR_NAMES: Record<string, string> = {
@@ -59,11 +60,17 @@ export function findOpusByLine(characterId: string, line: string): { path: strin
   if (!line) return null
   const target = line.trim()
   const opus = listOpus(characterId)
-  const exact = opus.find((o) => o.line === target)
-  if (exact) return { path: exact.path, file: exact.file }
+  const exact = opus.filter((o) => o.line === target)
+  if (exact.length) {
+    const picked = exact[randomInt(exact.length)]
+    return { path: picked.path, file: picked.file }
+  }
   const norm = (s: string): string => s.replace(/\s+/g, '').replace(/[，。！？、！？]/g, '')
-  const fuzzy = opus.find((o) => norm(o.line) === norm(target))
-  if (fuzzy) return { path: fuzzy.path, file: fuzzy.file }
+  const fuzzy = opus.filter((o) => norm(o.line) === norm(target))
+  if (fuzzy.length) {
+    const picked = fuzzy[randomInt(fuzzy.length)]
+    return { path: picked.path, file: picked.file }
+  }
   return null
 }
 

@@ -45,12 +45,11 @@ export default function AttachmentPicker({
     k === 'image' ? '▣' : k === 'text' ? '▤' : k === 'pdf' ? '▥' : k === 'audio' ? '♪' : k === 'video' ? '▷' : '◇'
 
   return (
-    <div ref={boxRef} style={{ position: 'relative' }}>
+    <div ref={boxRef} className="chat-composer-action" style={{ position: 'relative' }}>
       <button
-        className="btn ghost"
+        className="btn ghost chat-composer-control chat-composer-icon-control"
         data-testid="attach-btn"
-        style={{ padding: 6, fontSize: 18, lineHeight: 1 }}
-        title="上传附件"
+        aria-label="上传附件"
         onClick={() => setOpen((v) => !v)}
       >
         +
@@ -72,7 +71,7 @@ export default function AttachmentPicker({
               <div className="att-list">
                 {attachments.slice(0, 12).map((a) => (
                   <div key={a.id} className="att-row">
-                    <button className="att-row-main" onClick={() => addExisting(a)} title="添加到本轮对话">
+                    <button className="att-row-main" onClick={() => addExisting(a)}>
                       <span style={{ fontSize: 13, color: 'var(--accent)' }}><FileText size={16} /></span>
                       <span className="truncate" style={{ fontSize: 12, flex: 1, textAlign: 'left' }}>
                         {a.name}
@@ -82,7 +81,7 @@ export default function AttachmentPicker({
                     <button
                       className="btn ghost sm danger"
                       style={{ padding: '2px 7px' }}
-                      title="从列表删除"
+                      aria-label="从列表删除"
                       onClick={(e) => {
                         e.stopPropagation()
                         void removeAttachment(a.id)
@@ -161,11 +160,11 @@ export function AttachmentChips({
           ) : (
             <span style={{ fontSize: 12, color: 'var(--accent)' }}>{iconOf(a.kind)}</span>
           )}
-          <button onClick={() => previewDocument(a.path)} title={a.path} style={{ minWidth: 0, textAlign: 'left' }}>
+          <button onClick={() => previewDocument(a.path)} aria-label={a.path} style={{ minWidth: 0, textAlign: 'left' }}>
             <span className="truncate" style={{ display: 'block', fontSize: 12, maxWidth: 200 }}>{a.name}</span>
             <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{a.name.split('.').pop() || a.kind} · {(a.size / 1024).toFixed(1)} KB</span>
           </button>
-          <button className="chip-x" onClick={() => onRemove(a.id)} title="移除">
+          <button className="chip-x" onClick={() => onRemove(a.id)} aria-label="移除">
             ×
           </button>
         </div>

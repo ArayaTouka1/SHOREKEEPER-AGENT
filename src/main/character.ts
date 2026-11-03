@@ -1,4 +1,5 @@
 import type { Character, Persona, CharacterAvatar, CharacterVoice, VoiceEngine } from '../shared/types'
+import { SHOREKEEPER_CALL_MODEL } from '../shared/callModels'
 import { JsonStore, uid, ensureDataDir } from './store'
 import { join } from 'node:path'
 import { existsSync, copyFileSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs'
@@ -16,7 +17,7 @@ import { loadBuiltinPersonas, readUserPersonas, PERSONA_FILES, userPersonaDir } 
 
 function defaultVoice(packFile: string, rate = 1, pitch = 0): CharacterVoice {
   return {
-    engine: 'voice-pack',
+    engine: 'system',
     voicePackFile: packFile,
     customPackPath: null,
     voiceId: '',
@@ -25,7 +26,7 @@ function defaultVoice(packFile: string, rate = 1, pitch = 0): CharacterVoice {
     volume: 100,
     autoSpeak: true,
     endpoint: '',
-    localBackend: 'gpt-sovits',
+    localBackend: 'indextts',
     inworldModel: 'inworld-tts-2'
   }
 }
@@ -159,7 +160,7 @@ export const characterStore = new JsonStore<CharacterState>('characters', () => 
   activeCharacterId: DEFAULT_ACTIVE
 }))
 
-const VALID_ENGINES: VoiceEngine[] = ['voice-pack', 'inworld', 'system', 'none']
+const VALID_ENGINES: VoiceEngine[] = ['inworld', 'indextts', 'gpt-sovits', 'openai-local', 'http-local', 'system', 'none']
 
 function migrate(state: CharacterState): CharacterState {
   let dirty = false
@@ -189,21 +190,27 @@ function migrate(state: CharacterState): CharacterState {
   }
 
   for (const c of state.characters) {
+    // Replace only the previous built-in Shorekeeper PMX choice. Keep any
+    // independently selected model path for this or other characters.
+    if (c.id === 'char_shorekeeper' && c.callModelPath?.replace(/\//g, '\\').toLowerCase() === 'h:\\人物模型\\鸣潮-守岸人ver1.1_by_alicia\\鸣潮-守岸人ver1.1_by_alicia\\守岸人ver1.1.pmx') {
+      c.callModelPath = SHOREKEEPER_CALL_MODEL
+      dirty = true
+    }
     const v = c.voice as Partial<CharacterVoice> | undefined
     if (!v) {
       c.voice = defaultVoice(DEFAULT_VOICE_PACK[c.id] ?? '', 1, 0)
       dirty = true
     } else {
       const legacy = v.engine as string
-      if (legacy === 'gpt-sovits' || legacy === 'cosyvoice' || legacy === 'local') {
-        v.engine = 'voice-pack'
+      if (legacy === 'cosyvoice' || legacy === 'local' || legacy === 'voice-pack') {
+        v.engine = 'system'
         dirty = true
       } else if (legacy === 'edge-tts') {
         v.engine = 'system'
         dirty = true
       }
       if (!VALID_ENGINES.includes(v.engine as VoiceEngine)) {
-        v.engine = 'voice-pack'
+        v.engine = 'system'
         dirty = true
       }
       if (typeof v.voicePackFile !== 'string') {
@@ -222,8 +229,8 @@ function migrate(state: CharacterState): CharacterState {
         v.endpoint = ''
         dirty = true
       }
-      if (!['kokoro', 'gpt-sovits', 'cosyvoice', 'qwen3'].includes(v.localBackend ?? '')) {
-        v.localBackend = 'kokoro'
+      if (!['kokoro', 'gpt-sovits', 'cosyvoice', 'qwen3', 'indextts'].includes(v.localBackend ?? '')) {
+        v.localBackend = 'indextts'
         dirty = true
       }
       if (typeof v.inworldModel !== 'string' || !v.inworldModel) {

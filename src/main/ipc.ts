@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, shell, dialog, app } from 'electron'
 import { CH } from '../shared/channels'
 import type { IpcResult } from '../shared/types'
+import { allowFile } from './localFile'
 
 export function handle<T>(channel: string, fn: (...args: any[]) => Promise<T> | T): void {
   ipcMain.handle(channel, async (_evt, ...args): Promise<IpcResult<T>> => {
@@ -25,11 +26,12 @@ export function registerSystemIpc(): void {
 
   handle(CH.pickImage, async () => {
     const res = await dialog.showOpenDialog({
-      title: '选择角色图片',
+      title: '选择图片',
       properties: ['openFile'],
       filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }]
     })
     if (res.canceled || res.filePaths.length === 0) return null
+    allowFile(res.filePaths[0])
     return res.filePaths[0]
   })
 

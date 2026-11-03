@@ -4,9 +4,9 @@ const crypto = require('node:crypto')
 const asar = require('@electron/asar')
 const { verifyReferenceVoices } = require('./verify-reference-voices.cjs')
 
-const resourceRoots = new Set(['icon.png', 'app.asar', 'app.asar.unpacked', 'elevate.exe', 'app-update.yml', 'cards', 'persona-profiles', 'personas', 'plugins', 'qwen3tts', 'qwen3voices', 'stickers', 'voices', 'opus', 'splash', 'sherpa-onnx', 'kokoro'])
-const privateName = /(^|\/)(\.env[^/]*|\.verification|userData|uploads|conversations|chat\.json|memory\.json|relationships\.json|settings\.json|models\.json|workspace-security\.json|Cookies|Login Data|Local Storage|Session Storage)(\/|$)|\.(log|sqlite|db|pem|pfx)$/i
-const textType = /\.(js|cjs|mjs|json|html|css|md|txt|ya?ml|ini)$/i
+const resourceRoots = new Set(['icon.png', 'app.ico', 'app.asar', 'app.asar.unpacked', 'elevate.exe', 'app-update.yml', 'cards', 'persona-profiles', 'personas', 'plugins', 'qwen3tts', 'qwen3voices', 'reference-voices', 'indextts', 'stt-model', 'stt-runtime', 'live2d', 'mmd-motions', 'shorekeeper-motion', 'stickers', 'voices', 'opus', 'splash', 'sherpa-onnx', 'kokoro'])
+const privateName = /(^|\/)(\.env[^/]*|\.verification|userData|uploads|conversations|chat\.json|chat-index\.json|chat-messages|memory\.json|relationships\.json|settings\.json|models\.json|workspace-security\.json|Cookies|Login Data|Local Storage|Session Storage)(\/|$)|\.(log|sqlite|db|pem|pfx)$/i
+const textType = /\.(js|cjs|mjs|py|json|html|css|md|txt|ya?ml|ini)$/i
 const privatePath = /(?:F:[\\/]+work[\\/]+aiagent|C:[\\/]+Users[\\/]+Administrator)/i
 const credential = /\bsk-[A-Za-z0-9_-]{20,}\b|\bAIza[A-Za-z0-9_-]{30,}\b|-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY-----/
 
@@ -27,6 +27,10 @@ module.exports = async function auditPackage(context) {
   const referenceVoices = verifyReferenceVoices(path.join(root, 'qwen3voices'), true)
   const sourceVoices = verifyReferenceVoices(path.resolve(__dirname, '../resources/qwen3voices'))
   if (JSON.stringify(referenceVoices) !== JSON.stringify(sourceVoices)) throw new Error('Packaged reference voices differ from public source assets')
+  const bundledVoiceDir = path.join(root, 'reference-voices')
+  const sourceVoiceDir = path.resolve(__dirname, '../resources/reference-voices')
+  const expectedBundledVoices = ['爱弥斯.wav', '流萤.wav', '守岸人-vocals.mp3']
+  assertDirectoryMatches(bundledVoiceDir, sourceVoiceDir, expectedBundledVoices)
   const manifest = []
   const add = (name, data) => {
     if (data && typeof data === 'object' && 'size' in data && !Buffer.isBuffer(data)) {
@@ -70,6 +74,16 @@ module.exports = async function auditPackage(context) {
   const report = { version: packaged.version, auditedAt: new Date().toISOString(), result: 'PASS', files: manifest }
   fs.writeFileSync(path.join(path.dirname(context.appOutDir), 'package-privacy-audit.json'), JSON.stringify(report, null, 2))
   console.log('  Package privacy audit PASS: ' + manifest.length + ' entries; no profile files, developer paths or matched credentials.')
+}
+
+function assertDirectoryMatches(packagedDir, sourceDir, expected) {
+  const names = fs.readdirSync(packagedDir).sort()
+  if (JSON.stringify(names) !== JSON.stringify([...expected].sort())) throw new Error('Unexpected bundled IndexTTS reference voice list')
+  for (const name of expected) {
+    const packaged = fs.readFileSync(path.join(packagedDir, name))
+    const source = fs.readFileSync(path.join(sourceDir, name))
+    if (!packaged.length || !packaged.equals(source)) throw new Error('Bundled IndexTTS reference voice differs from source: ' + name)
+  }
 }
 
 if (require.main === module) module.exports({ appOutDir: path.resolve(__dirname, '../release/win-unpacked') }).catch(error => { console.error(error.message); process.exitCode = 1 })

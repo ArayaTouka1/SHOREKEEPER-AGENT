@@ -40,6 +40,7 @@ export function registerAppFileScheme(): void {
         standard: true,
         secure: true,
         supportFetchAPI: true,
+        corsEnabled: true,
         stream: true,
         bypassCSP: true
       }
@@ -85,6 +86,13 @@ export function installAppFileProtocol(): void {
         return new Response('not found', { status: 404 })
       }
 
+      if (/[\\/]stt-runtime[\\/]ort-wasm-simd-threaded\.jsep\.(mjs|wasm)$/i.test(full)) {
+        return net.fetch(pathToFileURL(full).toString(), { headers: req.headers }).then((response) => {
+          const headers = new Headers(response.headers)
+          headers.set('Access-Control-Allow-Origin', '*')
+          return new Response(response.body, { status: response.status, headers })
+        })
+      }
       return net.fetch(pathToFileURL(full).toString(), { headers: req.headers })
     } catch {
       return new Response('bad request', { status: 400 })

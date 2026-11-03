@@ -45,12 +45,12 @@ function PdfView({ data }: { data: Uint8Array }): React.ReactElement {
   }, [pdf, page, zoom])
   return <>
     <div className="file-toolbar">
-      <button title="上一页" disabled={page <= 1} onClick={() => setPage(p => p - 1)}><ChevronLeft size={18} /></button>
+      <button aria-label="上一页" disabled={page <= 1} onClick={() => setPage(p => p - 1)}><ChevronLeft size={18} /></button>
       <span>{page} / {pdf?.numPages ?? '...'}</span>
-      <button title="下一页" disabled={!pdf || page >= pdf.numPages} onClick={() => setPage(p => p + 1)}><ChevronRight size={18} /></button>
-      <button title="缩小" disabled={zoom <= .5} onClick={() => setZoom(z => z - .25)}><Minus size={18} /></button>
+      <button aria-label="下一页" disabled={!pdf || page >= pdf.numPages} onClick={() => setPage(p => p + 1)}><ChevronRight size={18} /></button>
+      <button aria-label="缩小" disabled={zoom <= .5} onClick={() => setZoom(z => z - .25)}><Minus size={18} /></button>
       <span>{Math.round(zoom * 100)}%</span>
-      <button title="放大" disabled={zoom >= 2} onClick={() => setZoom(z => z + .25)}><Plus size={18} /></button>
+      <button aria-label="放大" disabled={zoom >= 2} onClick={() => setZoom(z => z + .25)}><Plus size={18} /></button>
     </div>
     {error && <div role="alert" className="file-error">{error}</div>}
     <div className="pdf-canvas"><canvas ref={canvas} /></div>
@@ -159,9 +159,9 @@ export default function DocumentPreview(): React.ReactElement | null {
     <section role="dialog" aria-modal="true" aria-label="文档预览" className="document-window">
       <header className="file-toolbar"><strong title={path}>{doc?.name ?? path}</strong>
         {doc?.text !== undefined && <div className="file-segments"><button aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}>预览</button><button aria-pressed={mode === 'edit'} onClick={() => setMode('edit')}>编辑</button></div>}
-        {mode === 'edit' && <button title="保存" disabled={busy || !dirty} onClick={() => void save()}><Save size={18} /></button>}
-        <button title="使用外部应用打开" onClick={() => void window.aimis.attachment.open(path)}><ExternalLink size={18} /></button>
-        <button title="关闭" disabled={busy} autoFocus onClick={close}><X size={20} /></button>
+        {mode === 'edit' && <button aria-label="保存" disabled={busy || !dirty} onClick={() => void save()}><Save size={18} /></button>}
+        <button aria-label="使用外部应用打开" onClick={() => void window.aimis.attachment.open(path)}><ExternalLink size={18} /></button>
+        <button aria-label="关闭" disabled={busy} autoFocus onClick={close}><X size={20} /></button>
       </header>
       <div className="document-path">{doc?.path ?? path}{dirty ? ' · 未保存' : ''}</div>
       {error && <div role="alert" className="file-error">{error}</div>}

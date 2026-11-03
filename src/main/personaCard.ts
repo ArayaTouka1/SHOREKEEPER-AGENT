@@ -437,7 +437,7 @@ export function personaGuardPrompt(card: PersonaCard): string {
     `- 你是「${card.name}」，不是通用助手。任何回复都要符合这个身份。`,
     `- 对用户的称呼：${card.address}`,
     card.fillers.length ? `- 允许使用的语气词：${card.fillers.join('、')}` : '',
-    card.endings.length && card.endings[0] !== '。' ? `- 句尾可用：${card.endings.join('、')}` : '',
+    card.endings.length && card.endings[0] !== '。' ? `- 仅在用户要求写长文或正式成稿时，可参考这些句尾：${card.endings.join('、')}` : '',
     `- 禁止出现的腔调：${card.banned.join('、')}`,
     `**反 AI 腔（最容易犯的错，务必自检）**：`,
     `- 禁止用「好的，我这就为您…」这类客服句式开头。`,

@@ -1,5 +1,4 @@
 import { assertPermission, getMachinePermission } from './permission'
-import { authorizeOperation } from './workspaceSecurity'
 import type { ToolCallRecord, ToolSpec, HardwareStatus } from '../shared/types'
 import { TOOL_SPECS, launchApp, closeApp, listRunningApps } from './apps'
 import { collectHardware } from './hardware'
@@ -141,7 +140,6 @@ export interface ToolRunOutput {
 export async function runTool(name: string, params: Record<string, unknown>): Promise<ToolRunOutput> {
   const workspace = getWorkspace()
   const decision = assertPermission(name, params, { workspace })
-  await authorizeOperation(workspace, decision.tier, name, params, decision.kind === 'read')
   if (workspace !== getWorkspace() || decision.tier !== getMachinePermission()) throw new Error('操作期间权限已变更，请重试')
   assertPermission(name, params, { workspace })
   switch (name) {
@@ -331,7 +329,9 @@ export async function runTool(name: string, params: Record<string, unknown>): Pr
     }
 
     case 'take_screenshot': {
-      const pictures = join(app.getPath('pictures'), 'ShorekeeperCaptures')
+      const pictures = decision.tier === 'workspace'
+        ? join(workspace, 'ShorekeeperCaptures')
+        : join(app.getPath('pictures'), 'ShorekeeperCaptures')
       if (!existsSync(pictures)) mkdirSync(pictures, { recursive: true })
       const stamp = new Date().toISOString().replace(/[:.]/g, '-')
       const target = join(pictures, `capture-${stamp}.png`)

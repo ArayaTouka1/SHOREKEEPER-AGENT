@@ -64,10 +64,10 @@ export class JsonStore<T> {
 
   write(value: T): void {
     ensureDataDir()
-    this.cache = value
     const tmp = `${this.file}.tmp`
     writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf-8')
     renameSync(tmp, this.file)
+    this.cache = value
   }
 
   /**

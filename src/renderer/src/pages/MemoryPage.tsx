@@ -221,7 +221,7 @@ export default function MemoryPage(): React.ReactElement {
                             className="btn ghost sm danger"
                             data-testid={`memory-delete-${m.id}`}
                             onClick={() => void deleteMemory(m.id)}
-                            title="删除"
+                            aria-label="删除"
                           >
                             ×
                           </button>

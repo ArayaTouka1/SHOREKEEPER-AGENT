@@ -1,9 +1,10 @@
 appId: com.shorekeeper.agent
 productName: 守岸人陪伴终端
+electronDist: node_modules/electron/dist
 copyright: Copyright © 2026 shorekeeper
 
 extraMetadata:
-  version: 0.21.0
+  version: 0.23.0
 
 directories:
   output: release
@@ -15,14 +16,42 @@ files:
   - out/renderer/**/*
   - package.json
   - '!**/*.map'
+  - '!node_modules/onnxruntime-node/**'
+  - '!node_modules/sharp/**'
+  - '!node_modules/@img/**'
   - '!**/.env*'
   - '!**/*.{log,sqlite,db,pem,pfx}'
   - '!**/{.verification,userData,uploads,conversations}/**'
   - '!node_modules/**/{test,__tests__,docs,example,examples}/**'
 
 extraResources:
-  - from: ../icon.png
-    to: icon.png
+  - from: resources/stt-runtime
+    to: stt-runtime
+    filter:
+      - '*.mjs'
+      - '*.wasm'
+  - from: resources/stt-model
+    to: stt-model
+    filter:
+      - '**/*'
+  - from: build/icon.ico
+    to: app.ico
+  - from: resources/live2d
+    to: live2d
+    filter:
+      - live2dcubismcore.min.js
+      - Cubism-Core-LICENSE.md
+      - Cubism-SDK-LICENSE.md
+      - shaders/**/*
+  - from: resources/mmd-motions
+    to: mmd-motions
+    filter:
+      - '*.vmd'
+      - LICENSE.md
+  - from: resources/shorekeeper-motion
+    to: shorekeeper-motion
+    filter:
+      - stand1.glb
   - from: ../人设
     to: persona-profiles
     filter:
@@ -62,6 +91,15 @@ extraResources:
       - aemeath.wav
       - firefly.wav
       - chloe.wav
+  - from: resources/indextts
+    to: indextts
+    filter:
+      - runner.py
+  - from: resources/reference-voices
+    to: reference-voices
+    filter:
+      - '**/*.wav'
+      - '**/*.mp3'
   - from: resources/opus
     to: opus
     filter:
@@ -73,24 +111,31 @@ extraResources:
 
 asar: true
 afterPack: scripts/audit-package.cjs
-compression: maximum
+compression: normal
 electronLanguages:
   - zh-CN
   - en-US
 
+publish:
+  provider: github
+  owner: ArayaTouka1
+  repo: SHOREKEEPER-AGENT
+  releaseType: release
+
 win:
-  icon: ../icon.png
+  icon: build/icon.ico
   target:
     - target: nsis
       arch:
         - x64
-    - target: portable
+    - target: zip
       arch:
         - x64
   requestedExecutionLevel: asInvoker
 
 nsis:
-  artifactName: ${productName}-${version}-${arch}-setup.${ext}
+  include: build/installer.nsh
+  artifactName: Shorekeeper-Agent-${version}-${arch}-setup.${ext}
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
@@ -102,5 +147,3 @@ nsis:
     - zh_CN
   language: '2052'
 
-portable:
-  artifactName: ${productName}-${version}-${arch}-portable.${ext}

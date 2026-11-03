@@ -8,6 +8,7 @@ import type {
   Character,
   ChatMessage,
   ChatSendChunk,
+  CallRenderConfig,
   CloseAppResult,
   CloudTtsConfig,
   Conversation,
@@ -77,6 +78,30 @@ declare global {
       configuration(): Promise<IpcResult<Pick<AppBootstrap, 'settings' | 'character' | 'characters' | 'persona' | 'personas' | 'models' | 'activeModelId'> & { workspace: string }>>
       onStateChanged(cb: () => void): () => void
       bootstrap(): Promise<IpcResult<AppBootstrap>>
+      call: {
+        open(conversationId?: string, mode?: 'voice' | 'video'): Promise<IpcResult<boolean>>
+        close(): void
+        begin(): Promise<IpcResult<{ conversationId: string; greeting: { text: string; opusUrl: string | null } | null }>>
+        send(input: { conversationId: string; text: string }): Promise<IpcResult<{ messageId: string }>>
+        modelFile(relativePath: string): Promise<IpcResult<Uint8Array | null>>
+        runtimeUrl(): Promise<IpcResult<string>>
+        renderPreviewOpen(characterId: string, renderKey: string, config: CallRenderConfig): Promise<IpcResult<boolean>>
+        renderPreviewClose(): Promise<IpcResult<boolean>>
+        renderPreviewUpdate(renderKey: string, config: CallRenderConfig): Promise<IpcResult<boolean>>
+        onRenderPreviewUpdate(cb: (renderKey: string, config: CallRenderConfig) => void): () => void
+        onRenderPreviewClosed(cb: () => void): () => void
+        state(): Promise<IpcResult<{ phase: 'ringing' | 'active'; initiator: 'user' | 'character'; mode: 'voice' | 'video' }>>
+        accept(): Promise<IpcResult<{ greeting: { text: string; opusUrl: string | null } }>>
+        reject(): Promise<IpcResult<boolean>>
+        speechFinished(conversationId: string): Promise<IpcResult<boolean>>
+        onState(cb: (active: boolean) => void): () => void
+        onEnded(cb: (conversationId: string) => void): () => void
+      }
+      live2d: {
+        pickModel(currentPath?: string): Promise<IpcResult<string | null>>
+        pickCore(): Promise<IpcResult<string | null>>
+        prepare(characterId?: string): Promise<IpcResult<{ modelUrl: string; coreUrl: string; shaderUrl: string; modelName: string; missingCore: boolean; format: 'cubism' | 'mmd-pmx' | 'gltf'; idleMotionUrl?: string; talkMotionUrl?: string }>>
+      }
       character: {
         list(): Promise<IpcResult<Character[]>>
         save(
@@ -118,6 +143,7 @@ declare global {
           attachmentIds?: string[]
           image?: MessageImage
         }): Promise<IpcResult<{ messageId: string }>>
+        proactive(conversationId: string): Promise<IpcResult<ChatMessage | null>>
         abort(conversationId: string): Promise<IpcResult<boolean>>
         onStream(cb: (chunk: ChatSendChunk) => void): () => void
       }
@@ -170,6 +196,27 @@ declare global {
         >
         models(provider?: string): Promise<IpcResult<string[]>>
         switchProvider(provider: string): Promise<IpcResult<CloudTtsConfig>>
+      }
+      indexTts: {
+        status(): Promise<IpcResult<{ ok: boolean; message: string; paths: { python: string; repo: string; modelDir: string; runner: string; installDir: string } }>>
+        voices(directory?: string): Promise<IpcResult<{ directory: string; voices: Array<{ name: string; path: string; bytes: number }> }>>
+        pickVoiceFolder(): Promise<IpcResult<string | null>>
+        synthesize(text: string, refAudioPath?: string): Promise<IpcResult<{ path: string; url: string; bytes: number }>>
+        install(): Promise<IpcResult<{ installDir: string; repo: string; python: string; modelDir: string; message: string }>>
+        onInstallProgress(cb: (progress: { stage: string; message: string; percent: number; receivedBytes?: number; totalBytes?: number }) => void): () => void
+      }
+      appUpdate: {
+        check(): Promise<IpcResult<unknown>>
+        state(): Promise<IpcResult<{ status: string; message: string; version?: string; percent?: number }>>
+        install(): Promise<IpcResult<boolean>>
+        onState(cb: (state: { status: 'idle' | 'checking' | 'available' | 'downloading' | 'ready' | 'not-available' | 'error'; message: string; version?: string; percent?: number }) => void): () => void
+      }
+      gptSovits: {
+        probe(endpoint: string): Promise<IpcResult<{ ok: boolean; message: string }>>
+        synthesize(text: string, overrides?: { refAudioPath?: string; refText?: string }): Promise<IpcResult<{ path: string; url: string; bytes: number }>>
+      }
+      localHttpTts: {
+        synthesize(input: { engine: 'openai-local' | 'http-local'; text: string; voiceId?: string }): Promise<IpcResult<{ path: string; url: string; bytes: number }>>
       }
       /**
        */
@@ -236,6 +283,7 @@ declare global {
         reset(id: string): Promise<IpcResult<import('../../../shared/relationship').CharacterRelationship>>
       }
       model: {
+        connectionTest(input: { baseUrl: string; apiKey?: string; model?: string }): Promise<IpcResult<{ ok: boolean; message: string; models?: string[] }>>
         list(): Promise<IpcResult<ModelInfo[]>>
         selectable(): Promise<IpcResult<ModelInfo[]>>
         state(): Promise<IpcResult<ModelState>>
@@ -265,6 +313,7 @@ declare global {
         list(): Promise<IpcResult<Attachment[]>>
         pick(): Promise<IpcResult<{ attachments: Attachment[]; list: Attachment[] } | null>>
         importFile(path: string): Promise<IpcResult<{ attachment: Attachment; list: Attachment[] }>>
+        importDropped(file: File): Promise<IpcResult<{ attachment: Attachment; list: Attachment[] }> | null>
         external(path: string): Promise<IpcResult<Attachment | null>>
         remove(id: string): Promise<IpcResult<Attachment[]>>
         open(path: string): Promise<IpcResult<{ ok: boolean; error: string }>>

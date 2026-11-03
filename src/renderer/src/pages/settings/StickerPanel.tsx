@@ -309,7 +309,7 @@ export default function StickerPanel(): React.ReactElement {
                     <button
                       key={w.url}
                       className="sticker-cell"
-                      title={w.url}
+                      aria-label={w.url}
                       onClick={() => void downloadOne(w.url)}
                     >
                       <img src={w.thumbnail ?? w.url} alt="" loading="lazy" referrerPolicy="no-referrer" />
@@ -352,11 +352,11 @@ export default function StickerPanel(): React.ReactElement {
             }}
           >
             {shown.map((s) => (
-              <div key={s.id} className="sticker-cell" style={{ position: 'relative' }} title={`${s.mood} · ${s.source}`}>
+              <div key={s.id} className="sticker-cell" style={{ position: 'relative' }}>
                 <img src={s.dataUrl} alt={s.mood} loading="lazy" />
                 {s.source !== 'local' && (
                   <button
-                    title="删除"
+                    aria-label="删除"
                     onClick={() => void remove(s.id)}
                     style={{
                       position: 'absolute',

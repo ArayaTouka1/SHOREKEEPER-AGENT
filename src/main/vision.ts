@@ -4,6 +4,7 @@
 
 import { readFileSync } from 'node:fs'
 import { extname } from 'node:path'
+import { appFetch } from './network'
 
 const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp']
 
@@ -35,7 +36,7 @@ export async function describeImage(path: string, cfg: VisionConfig, prompt?: st
     prompt ??
     '请客观、详细地描述这张图片的内容：画面主体、人物或物体、动作、场景、文字（如有）、整体氛围。用于让一个 AI 陪伴角色理解用户发来的图片。不要臆测图片之外的信息。'
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
+  const res = await appFetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
